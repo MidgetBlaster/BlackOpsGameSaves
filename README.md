@@ -41,7 +41,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.5
+python package_release.py v1.0.6
 ```
 
 The build script produces `BlackOpsGameSaves.exe`, `InstallGameSaveMod.exe`,
@@ -66,7 +66,7 @@ Push the prepared branch and release tag with:
 
 ```powershell
 git push -u origin main
-git push origin v1.0.5
+git push origin v1.0.6
 ```
 
 The tag push starts the Windows release workflow. The local release package is

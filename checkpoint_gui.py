@@ -109,6 +109,9 @@ class CheckpointApp(tk.Tk):
         self.current_session_legacy = None
         self.current_map = None
         self.map_images = {}
+        self.map_hint = None
+        self.map_hint_label = None
+        self.map_hint_hide = None
         self.busy = False
         self.closing = False
         self.launch_after_close = None
@@ -364,6 +367,34 @@ class CheckpointApp(tk.Tk):
         self.tree.yview_scroll(self._wheel_steps(event), "units")
         return "break"
 
+    def _show_map_hint(self, event, count: int):
+        if self.map_hint_hide is not None:
+            self.after_cancel(self.map_hint_hide)
+            self.map_hint_hide = None
+        if self.map_hint is None:
+            self.map_hint = tk.Toplevel(self)
+            self.map_hint.overrideredirect(True)
+            self.map_hint.attributes("-topmost", True)
+            self.map_hint.configure(bg=BORDER)
+            self.map_hint_label = tk.Label(self.map_hint, bg=PANEL, fg=TEXT,
+                                           font=("Segoe UI", 9), padx=8, pady=4)
+            self.map_hint_label.pack(padx=1, pady=1)
+        self.map_hint_label.configure(text=f"{count} {'save' if count == 1 else 'saves'}")
+        self.map_hint.geometry(f"+{event.x_root + 14}+{event.y_root + 16}")
+        self.map_hint.deiconify()
+
+    def _hide_map_hint(self):
+        if self.map_hint_hide is not None:
+            self.after_cancel(self.map_hint_hide)
+            self.map_hint_hide = None
+        if self.map_hint is not None:
+            self.map_hint.withdraw()
+
+    def _schedule_map_hint_hide(self, _event):
+        if self.map_hint_hide is not None:
+            self.after_cancel(self.map_hint_hide)
+        self.map_hint_hide = self.after(80, self._hide_map_hint)
+
     def _update_overwrite_button(self):
         overwrite = self.save_policy.get() == "Replace started save"
         self.overwrite_button.configure(
@@ -609,6 +640,7 @@ class CheckpointApp(tk.Tk):
         self._render_details()
 
     def _render_gallery(self):
+        self._hide_map_hint()
         for child in self.gallery_grid.winfo_children():
             child.destroy()
         counts = {}
@@ -621,8 +653,8 @@ class CheckpointApp(tk.Tk):
         maps.extend(name for name in counts if name and name not in MAP_ART)
         self.gallery_grid.columnconfigure(0, weight=1)
         for index, map_name in enumerate(maps):
-            card = tk.Frame(self.gallery_grid, bg=SURFACE, height=76, cursor="hand2")
-            card.grid(row=index, column=0, padx=2, pady=2, sticky="ew")
+            card = tk.Frame(self.gallery_grid, bg=SURFACE, height=44, cursor="hand2")
+            card.grid(row=index, column=0, padx=2, pady=1, sticky="ew")
             card.pack_propagate(False)
             art_name = MAP_ART.get(map_name, ("", None))[1]
             image_label = None
@@ -631,29 +663,27 @@ class CheckpointApp(tk.Tk):
                     key = f"list:{art_name}"
                     if key not in self.map_images:
                         path = core.ROOT / "ui textures" / "png" / f"{art_name}.png"
-                        self.map_images[key] = tk.PhotoImage(file=str(path)).subsample(4, 4)
+                        self.map_images[key] = tk.PhotoImage(file=str(path)).subsample(8, 8)
                     image_label = tk.Label(card, image=self.map_images[key], bg=SURFACE,
                                            cursor="hand2")
-                    image_label.pack(side="left", padx=(6, 12), pady=6)
+                    image_label.pack(side="left", padx=(6, 10), pady=5)
                     image_label.bind("<Button-1>", lambda _event, key=map_name: self.show_map(key))
                 except tk.TclError:
                     pass
-            text_frame = tk.Frame(card, bg=SURFACE, cursor="hand2")
-            text_frame.pack(side="left", fill="y")
-            name_label = tk.Label(text_frame, text=map_title(map_name), bg=SURFACE, fg=TEXT,
+            name_label = tk.Label(card, text=map_title(map_name), bg=SURFACE, fg=TEXT,
                                   font=("Segoe UI", 10, "bold"), cursor="hand2")
-            name_label.pack(anchor="w", pady=(12, 0))
+            name_label.pack(side="left")
             count = counts.get(map_name, 0)
-            count_label = tk.Label(text_frame, text=f"{count} {'save' if count == 1 else 'saves'}",
-                                    bg=SURFACE, fg=MUTED, font=("Segoe UI", 9), cursor="hand2")
-            count_label.pack(anchor="w", pady=(2, 0))
-            for widget in (card, text_frame, name_label, count_label):
+            for widget in (card, name_label, image_label):
+                if widget is None:
+                    continue
                 widget.bind("<Button-1>", lambda _event, key=map_name: self.show_map(key))
+                widget.bind("<Enter>", lambda event, saves=count: self._show_map_hint(event, saves))
+                widget.bind("<Leave>", self._schedule_map_hint_hide)
                 self._bind_wheel(widget, self._scroll_gallery)
-            if image_label is not None:
-                self._bind_wheel(image_label, self._scroll_gallery)
 
     def show_map(self, map_name: str):
+        self._hide_map_hint()
         self.current_map = map_name
         self.map_heading.configure(text=map_title(map_name))
         self.selected_map_caption.configure(text=map_title(map_name))

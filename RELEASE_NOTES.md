@@ -1,4 +1,8 @@
-# Black Ops Game Saves v1.0.5
+# Black Ops Game Saves v1.0.6
+
+- Makes each map row smaller and shows the save count only when hovering over it.
+
+## v1.0.5
 
 - Select several checkpoints with Shift or Ctrl, then export them in one
   package or delete them together.
