@@ -11,12 +11,14 @@ class FakeGame:
     def __init__(self):
         self.round = 4
         self.round_change = False
+        self.magic = 1000
         self.save_id = 1
         self.closed = False
 
     def u32(self, address):
         return {core.SCENE_ADDR: 204, core.MENU_ADDR: 0,
-                core.TIMER_ADDR: 300, core.MAGIC_ADDR: 1000}[address]
+                core.TIMER_ADDR: 300, core.MAGIC_ADDR: self.magic,
+                core.SAVE_QUEUE_COUNT: 0, core.ASYNC_DISK_SAVE: 0}[address]
 
     def foreground(self):
         return True
@@ -30,7 +32,8 @@ class FakeGame:
 
 
 def exercise(player_f11, skip_initial_round=None, manual_tick=1,
-             advance_round=True, advance_again=False, round_end_tick=None):
+             advance_round=True, advance_again=False, round_end_tick=None,
+             missing_round=False, magic_transition=False, start_round=None):
     game = FakeGame()
     clock = [0.0]
     events = []
@@ -52,6 +55,10 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
                 game.round = 6
             if round_end_tick == self.ticks:
                 game.round_change = True
+            if magic_transition and self.ticks == 2:
+                game.magic = 2000
+            if magic_transition and self.ticks == 3:
+                game.magic = 500
 
     def save(_game, number):
         game.save_id += 1
@@ -63,7 +70,7 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
     with TemporaryDirectory(dir=core.ROOT) as directory:
         with (patch.object(core, "game_pid", return_value=4420),
               patch.object(core, "GameProcess", return_value=game),
-              patch.object(core, "live_round", side_effect=lambda _game: game.round),
+              patch.object(core, "live_round", side_effect=lambda _game: None if missing_round else game.round),
               patch.object(core, "effective_scene", return_value=(204, None)),
               patch.object(core, "committed", side_effect=lambda _game: (
                   core.SAVE_A, b"", {"map": "zombie_cod5_factory", "save_id": game.save_id})),
@@ -71,7 +78,8 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
               patch.object(core, "request_and_save", side_effect=save),
               patch.object(core.time, "monotonic", side_effect=lambda: clock[0]),
               patch.object(core, "RECOVERY_FILE", Path(directory) / "latest.bo1checkpoint")):
-            core.watch(stop_event=Stop(), on_event=lambda *event: events.append(event),
+            core.watch(start_round=start_round, stop_event=Stop(),
+                       on_event=lambda *event: events.append(event),
                        skip_initial_round=skip_initial_round, enable_recovery=False)
     assert game.closed
     return events
@@ -109,6 +117,15 @@ assert captures(opening_transition) == []
 
 later_manual = exercise(player_f11=True, skip_initial_round=4, manual_tick=4)
 assert captures(later_manual) == [("manual", 4)]
+
+missing_round_auto = exercise(player_f11=False, skip_initial_round=5,
+                              advance_round=False, missing_round=True,
+                              magic_transition=True, start_round=5)
+assert captures(missing_round_auto) == [("saved", 5)]
+missing_round_manual = exercise(player_f11=True, skip_initial_round=5,
+                                advance_round=False, missing_round=True,
+                                manual_tick=4, start_round=5)
+assert captures(missing_round_manual) == [("manual", 5)]
 
 
 tracker = core.RoundEndTracker()
@@ -156,5 +173,33 @@ load_jump = core.RoundEndTracker()
 assert load_jump.update(204, 0, 300, 1, False, 0) is None
 assert load_jump.update(204, 0, 301, 4, False, 10) is None
 assert load_jump.update(204, 0, 302, 4, False, 11) is None
+
+restored_zero_round = core.RoundEndTracker("End of Rounds", 5)
+assert restored_zero_round.update(204, 0, 300, None, True, 0) is None
+assert restored_zero_round.update(204, 0, 301, None, False, 1) is None
+assert restored_zero_round.update(204, 0, 302, None, False, 7) is None
+assert restored_zero_round.update(204, 0, 303, None, True, 8) is None
+assert restored_zero_round.update(204, 0, 304, None, True, 8.2) == (5, 5, "round end")
+restored_zero_round.mark_saved(5)
+assert restored_zero_round.update(204, 0, 305, None, False, 10) is None
+assert restored_zero_round.round == 6
+
+retry_after_transition = core.RoundEndTracker("End of Rounds", 5)
+assert retry_after_transition.update(204, 0, 300, None, False, 0) is None
+assert retry_after_transition.update(204, 0, 301, None, False, 6) is None
+assert retry_after_transition.update(204, 0, 302, None, True, 7) is None
+assert retry_after_transition.update(204, 0, 303, None, True, 7.2) == (5, 5, "round end")
+retry_after_transition.defer(7.2)
+assert retry_after_transition.update(204, 0, 304, None, False, 8) is None
+assert retry_after_transition.round == 6
+assert retry_after_transition.update(204, 0, 305, None, False, 9.3) == (5, 5, "round end")
+
+restored_start = core.RoundEndTracker("Start of Round", 5)
+assert restored_start.update(204, 0, 300, None, True, 0) is None
+assert restored_start.update(204, 0, 301, None, False, 1) is None
+assert restored_start.update(204, 0, 302, None, False, 7) is None
+assert restored_start.update(204, 0, 303, None, True, 8) is None
+assert restored_start.update(204, 0, 304, None, False, 9) is None
+assert restored_start.update(204, 0, 305, None, False, 9.5) == (6, 5, "round start flag")
 
 print("Automatic rounds and player F11 capture passed")

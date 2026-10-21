@@ -1045,6 +1045,12 @@ class CheckpointApp(tk.Tk):
             return
         self.watch_stop = threading.Event()
         skip_round = self.skip_initial_round
+        active_profile = self.library.data["active_profile"]
+        previous_saves = [entry for entry in self.library.data["saves"].values()
+                          if entry.get("profile_id") == active_profile and
+                          isinstance(entry.get("round"), int) and entry["round"] > 0]
+        latest = max(previous_saves, key=lambda entry: entry.get("saved_at", "")) if previous_saves else None
+        baseline_round = skip_round or (latest["round"] if latest else 1)
         save_timing = self.save_timing.get()
 
         def work():
@@ -1060,7 +1066,7 @@ class CheckpointApp(tk.Tk):
                         self.events.put(("watch_end", _round))
                     elif event == "error":
                         self.events.put(("watch_error", _round))
-                core.watch(None, self.watch_stop, callback, self.save_lock,
+                core.watch(baseline_round, self.watch_stop, callback, self.save_lock,
                            skip_initial_round=skip_round, enable_recovery=False,
                            save_timing=save_timing)
             except Exception as error:

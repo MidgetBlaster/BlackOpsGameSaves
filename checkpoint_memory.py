@@ -32,6 +32,12 @@ BASE = 0x400000
 COMMITTED_PTR = 0x01D04BA0
 WRITE_PTR = 0x01D04BA4
 COMMITTED_FLAG = 0x023A5594
+SAVE_QUEUE = 0x02899800
+SAVE_QUEUE_COUNT = 0x02899CD4
+SAVE_REQUEST_SIZE = 0x19C
+ASYNC_DISK_SAVE = 0x01C77020
+ASYNC_CALLBACK_SAVE = 0x01C77024
+CALLBACK_NOW_OFFSET = 0x104F1
 SAVE_A = 0x01D04BA8
 SAVE_B = 0x01D1509C
 SAVE_SIZE = 0x104F4
@@ -523,14 +529,16 @@ class RoundTracker:
 class RoundEndTracker:
     """Detect the selected wave boundary without saving on first attach."""
 
-    def __init__(self, timing: str = "End of Rounds"):
+    def __init__(self, timing: str = "End of Rounds",
+                 baseline_round: int | None = None):
         if timing not in SAVE_TIMINGS:
             raise ValueError(f"Unknown auto save timing: {timing}")
         self.timing = timing
         self.scene = None
-        self.round = None
+        self.round = baseline_round
         self.round_change = None
         self.active_since = None
+        self.transition_armed = False
         self.completed_round = None
         self.pending = None  # save label, completed round, due time, signal
 
@@ -543,8 +551,12 @@ class RoundEndTracker:
             self.__init__(self.timing)
         if scene is not None:
             self.scene = scene
+        inferred = round_number is None
+        if inferred:
+            round_number = self.round
         if round_number is None or menu != 0 or timer <= START_TICKS.get(scene, 195):
             self.active_since = None
+            self.transition_armed = False
             self.round_change = round_change
             return None
 
@@ -566,15 +578,27 @@ class RoundEndTracker:
         if round_change:
             completed_at_edge = (previous_round if previous_round is not None and
                                  round_number == previous_round + 1 else round_number)
-            if (self.timing != "Start of Round" and previous_change is False and self.active_since is not None
-                    and now - self.active_since >= 5
-                    and self.completed_round != completed_at_edge):
-                delay = 0.75 if self.timing == "Round Transitions" else 0.1
-                self.pending = (round_number, completed_at_edge, now + delay,
-                                "round transition" if self.timing == "Round Transitions" else "round end")
+            if (previous_change is False and self.active_since is not None
+                    and now - self.active_since >= 5):
+                self.transition_armed = True
+                if self.timing != "Start of Round" and self.completed_round != completed_at_edge:
+                    delay = 0.75 if self.timing == "Round Transitions" else 0.1
+                    self.pending = (round_number, completed_at_edge, now + delay,
+                                    "round transition" if self.timing == "Round Transitions" else "round end")
             self.active_since = None
+        elif inferred and previous_change and self.transition_armed:
+            # A restored game's round byte can stay zero. Advance after the
+            # end signal even if a save failed, while retaining its retry.
+            completed = self.round
+            self.round += 1
+            if self.timing == "Start of Round" and self.completed_round != completed:
+                self.pending = (self.round, completed, now + 0.4, "round start flag")
+            self.active_since = now
+            self.transition_armed = False
         elif previous_change is not False or self.active_since is None:
             self.active_since = now
+            if previous_change:
+                self.transition_armed = False
         self.round_change = round_change
 
         if (self.pending and now >= self.pending[2] and
@@ -599,14 +623,68 @@ class CheckpointNotCommitted(RuntimeError):
     """The bound save key was sent, but the game did not commit a save."""
 
 
+class SaveQueueUnblocker:
+    """Recover memory checkpoints blocked by an abandoned devsave disk write."""
+
+    def __init__(self):
+        self.signature = None
+        self.since = None
+        self.first_frame = None
+
+    def observe(self, game: GameProcess, now: float) -> bool:
+        count = game.u32(SAVE_QUEUE_COUNT)
+        pointer = game.u32(ASYNC_DISK_SAVE)
+        if not 0 < count <= 3 or pointer not in BUFFERS:
+            self.signature = self.since = self.first_frame = None
+            return False
+        if (game.u32(pointer + STATE_OFFSET) != 0 or
+                game.read(pointer + CALLBACK_NOW_OFFSET, 1) != b"\0"):
+            self.signature = self.since = self.first_frame = None
+            return False
+        ids = tuple(game.u32(SAVE_QUEUE + index * SAVE_REQUEST_SIZE + 0x180)
+                    for index in range(count))
+        signature = (pointer, ids)
+        if signature != self.signature:
+            self.signature, self.since = signature, now
+            self.first_frame = game.u32(LEVEL_FRAME_ADDR)
+            return False
+        if now - self.since < 3 or game.u32(LEVEL_FRAME_ADDR) - self.first_frame < 20:
+            return False
+        with game.suspended():
+            if (game.u32(ASYNC_DISK_SAVE) != pointer or
+                    game.u32(pointer + STATE_OFFSET) != 0 or
+                    game.read(pointer + CALLBACK_NOW_OFFSET, 1) != b"\0" or
+                    game.u32(SAVE_QUEUE_COUNT) != count or
+                    any(game.u32(SAVE_QUEUE + index * SAVE_REQUEST_SIZE + 0x180) != ids[index]
+                        for index in range(count))):
+                self.signature = self.since = self.first_frame = None
+                return False
+            for index in range(count):
+                request = SAVE_QUEUE + index * SAVE_REQUEST_SIZE
+                if (game.read(request, 64).split(b"\0", 1)[0] == b"1" and
+                        game.u32(request + 0x184) == 1 and
+                        game.u32(request + 0x188) == 6):
+                    # The persistent archive needs only the memory commit.
+                    # Avoid another asynchronous disk write blocking the queue.
+                    game.write(request + 0x188, struct.pack("<I", 2))
+            if game.u32(ASYNC_CALLBACK_SAVE) == pointer:
+                game.write(ASYNC_CALLBACK_SAVE, struct.pack("<I", 0))
+            game.write(ASYNC_DISK_SAVE, struct.pack("<I", 0))
+        self.signature = self.since = self.first_frame = None
+        return True
+
+
 def wait_for_new_save(game: GameProcess, prior_id: int, timeout: float = 12,
                       prior_address: int | None = None):
     deadline = time.monotonic() + timeout
+    unblocker = SaveQueueUnblocker()
     while time.monotonic() < deadline:
         try:
             address, _, h = committed(game)
             if h["save_id"] != prior_id or (prior_address in BUFFERS and address != prior_address):
                 return
+            if unblocker.observe(game, time.monotonic()):
+                print("Cleared a stalled disk write; pending checkpoints can commit to memory.", flush=True)
         except RuntimeError:
             pass
         except OSError as error:
@@ -677,7 +755,7 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
     game = None
     tracker = RoundTracker(start_round or 1)
     tracker.saved_round = skip_initial_round
-    end_tracker = RoundEndTracker(save_timing)
+    end_tracker = RoundEndTracker(save_timing, start_round or skip_initial_round)
     resume_manual_after = (time.monotonic() + 5 if skip_initial_round is not None else 0)
     waiting_for_focus = None
     last_phase = None
@@ -686,6 +764,7 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
     last_round = None
     last_reported_round = None
     next_recovery = time.monotonic() + RECOVERY_INTERVAL
+    unblocker = SaveQueueUnblocker()
     try:
         while stop_event is None or not stop_event.is_set():
             found = game_pid()
@@ -715,7 +794,7 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                 pid = found
                 tracker = RoundTracker(start_round or 1)
                 tracker.saved_round = skip_initial_round
-                end_tracker = RoundEndTracker(save_timing)
+                end_tracker = RoundEndTracker(save_timing, start_round or skip_initial_round)
                 waiting_for_focus = None
                 last_phase = None
                 last_marker = None
@@ -723,8 +802,9 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                 last_round = None
                 last_reported_round = None
                 next_recovery = time.monotonic() + RECOVERY_INTERVAL
+                unblocker = SaveQueueUnblocker()
                 if pid:
-                    game = GameProcess(pid)
+                    game = GameProcess(pid, write=True, suspend=True)
                     print(f"Attached to Black Ops process {pid}", flush=True)
                     print("Monitoring Zombies rounds and player F11 checkpoints.", flush=True)
                 else:
@@ -739,14 +819,17 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                     magic = game.u32(MAGIC_ADDR)
                     round_change = bool(game.read(ROUND_CHANGE_ADDR, 1)[0])
                     scene, checkpoint_map = effective_scene(game, raw_scene)
+                    if unblocker.observe(game, time.monotonic()):
+                        print("Cleared a stalled disk write; pending checkpoints can commit to memory.", flush=True)
                     observed_round = live_round(game)
-                    if observed_round is not None:
-                        last_round = observed_round
-                        if observed_round != last_reported_round:
-                            print(f"Watching round {observed_round} (round-end flag={int(round_change)})", flush=True)
+                    current_round = observed_round or end_tracker.round or tracker.round
+                    if current_round is not None:
+                        last_round = current_round
+                        if current_round != last_reported_round:
+                            print(f"Watching round {current_round} (round-end flag={int(round_change)})", flush=True)
                             if on_event:
-                                on_event("round_seen", observed_round, None)
-                            last_reported_round = observed_round
+                                on_event("round_seen", current_round, None)
+                            last_reported_round = current_round
                     if scene is None:
                         phase = (raw_scene, "scene")
                     elif menu != 0:
@@ -776,15 +859,15 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                     elif not marker_ready:
                         last_marker = marker
                         marker_ready = True
-                    elif marker is not None and marker != last_marker and observed_round is not None:
+                    elif marker is not None and marker != last_marker and current_round is not None:
                         with save_lock if save_lock is not None else nullcontext():
-                            manual_path = snapshot(game, observed_round)
+                            manual_path = snapshot(game, current_round)
                         print(f"Captured player F11 save: {manual_path}", flush=True)
                         if on_event:
-                            on_event("manual", observed_round, manual_path)
+                            on_event("manual", current_round, manual_path)
                         last_marker = marker
-                        tracker.round = observed_round
-                        tracker.saved_round = observed_round
+                        tracker.round = current_round
+                        tracker.saved_round = current_round
                         tracker.pending = None
                         next_recovery = time.monotonic() + RECOVERY_INTERVAL
                         RECOVERY_FILE.unlink(missing_ok=True)
@@ -806,7 +889,18 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                             if on_event:
                                 on_event("round_end", completed_round, None)
                     elif observed_round is None and start_round is not None:
-                        round_number = tracker.update(scene, menu, timer, magic, now)
+                        fallback = tracker.update(scene, menu, timer, magic, now)
+                        if fallback is not None:
+                            completed_round = max(1, fallback - 1)
+                            end_tracker.round = max(end_tracker.round or 0, fallback)
+                            if (end_tracker.completed_round != completed_round and
+                                    not (end_tracker.pending and end_tracker.pending[1] == completed_round) and
+                                    now >= resume_manual_after):
+                                round_number = (fallback if save_timing == "Start of Round"
+                                                else completed_round)
+                                print(f"Round {completed_round} ended (round magic); requesting checkpoint", flush=True)
+                                if on_event:
+                                    on_event("round_end", completed_round, None)
                     if round_number:
                         if game.foreground() or game.activate_window():
                             if save_lock is None:
@@ -924,8 +1018,8 @@ def main():
         pid = game_pid()
         if not pid:
             raise RuntimeError("Start Black Ops and load the map first")
-        game = GameProcess(pid, write=args.action == "restore",
-                           suspend=args.action == "restore" and args.coop)
+        game = GameProcess(pid, write=args.action in ("save", "restore"),
+                           suspend=args.action == "save" or (args.action == "restore" and args.coop))
         try:
             if args.action == "save":
                 print("Switch to Black Ops now; requesting a save in 5 seconds...", flush=True)

@@ -64,7 +64,13 @@ when missing or different, backing up any replaced files under
   Cooperative player extraction still needs validation with a real cooperative checkpoint.
 - The manager starts watching when it opens. It makes a checkpoint when the
   Zombies round-end signal fires, using the advancing round counter if that
-  signal was missed, and archives a
+  signal was missed. After Continue, some sessions expose a zero round byte;
+  the manager then carries forward the saved round and uses the round-end flag
+  or round transition marker. If the game's asynchronous disk-save pointer
+  stalls after `devsave 1`, the manager waits three seconds, converts queued
+  `devsave 1` requests to memory-only commits, and clears the stale pointer.
+  This keeps subsequent round and F11 checkpoints flowing without changing
+  the GSC checksum or existing checkpoint files. It also archives a
   checkpoint made by pressing F11 in Black Ops. Opening the manager or starting
   a saved game does not create an automatic save. There is no round
   field or save-mode switch in the window. Black Ops needs to be in front when
