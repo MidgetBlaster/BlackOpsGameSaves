@@ -1,0 +1,12 @@
+clientscripts\_zombiemode_weap_black_hole_bomb.csc
+clientscripts\zombie_cosmodrome.csc
+clientscripts\zombie_cosmodrome_amb.csc
+clientscripts\zombie_cosmodrome_ffotd.csc
+maps\_zombiemode.gsc
+maps\_checkpoint_coop_pause.gsc
+maps\zombie_cosmodrome.gsc
+maps\zombie_cosmodrome_ai_monkey.gsc
+maps\zombie_cosmodrome_ffotd.gsc
+maps\zombie_cosmodrome_lander.gsc
+maps\zombie_cosmodrome_magic_box.gsc
+mod.csv

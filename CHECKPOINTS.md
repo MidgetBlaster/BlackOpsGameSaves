@@ -1,0 +1,210 @@
+# Persistent Black Ops Zombies checkpoints
+
+The game keeps Zombies' `devsave` checkpoints in process memory. Closing Black
+Ops discards them. This companion copies the committed memory checkpoint to a
+compressed, hashed file when a round ends and can put that checkpoint
+back into memory during a later run.
+
+This uses the save layout and fixed addresses documented in the
+[decompiled engine](https://github.com/MisaDev4/bo1-zombies-decompiled),
+especially `src/game_sp/g_sp_savegame.h` and `g_sp_savegame.cpp`. It accepts
+only the installed `BlackOps.exe` with SHA-256
+`1141278c4599025c85d0e27d1629a5e8ecb0568559c4d9653e693018c3b25f1e`.
+This is a process-memory tool for the retail game, not a build of the
+decompiled executable. It never uses `players/save/*.svg`.
+
+## Desktop save manager
+
+After installation, open `BlackOpsGameSaves.exe` in `mods/Game Save`, or
+double-click `Open Game Save.cmd`. For a source checkout, run
+`python .\checkpoint_gui.py` in this folder. Windows will ask for Administrator access so the window can read
+and write Black Ops memory. Close and reopen the manager after an update.
+
+The `release` folder has three separate Windows programs:
+
+- `InstallGameSaveMod.exe` installs only the Game Save mod and its loader files.
+- `InstallBlackOpsGameSaves.exe` installs only the save manager app into
+  `mods/Game Save`. Run the mod installer first on a new computer.
+- `BlackOpsGameSaves.exe` is the save manager itself. Keep it in
+  `mods/Game Save` alongside the installed mod files.
+
+Both installers propose the detected Black Ops directory and have a Browse
+button. The save manager installer offers a Desktop shortcut checkbox, selected
+by default. Their windows and executables use `BlackOpsGameSaves.ico`. Run
+`python build_release.py` to rebuild all three executables with PyInstaller.
+The mod installer deliberately excludes personal checkpoints and catalogs.
+Use **Export selected** or **Export all** in the manager to choose a folder
+with the Windows folder picker. The resulting `.bo1gamesave` file contains
+the checkpoint data, title, favorite mark, mode, and displayed player stats.
+Copy it to another computer and choose **Import saves** there. Imported
+checkpoints appear under **Imported saves** and can be started like local
+checkpoints. An import creates new files, so existing saves are retained.
+
+Click **Install Game Save mod** at the bottom right while Black Ops is closed.
+The installer finds the game beside the current mod, from Steam's installed
+libraries, or from Windows registry paths. It accepts `TA_TOOLS_PATH` as a
+hint only when it leads to Black Ops; a path to Black Ops III is ignored. If
+the game is not found, choose its folder. The installer copies the mod into
+`mods/Game Save`, carries over checkpoints and their titles, and opens the
+installed manager. It also installs the bundled `game_mod.zip` loader files
+when missing or different, backing up any replaced files under
+`mods/Game Save/checkpoint_saves/install_backups`. Existing saves in a prior
+`Game Save` installation are kept. Later, open the manager with
+`mods/Game Save/Open Game Save.cmd`.
+
+- The first screen shows the supplied Zombies map artwork in a black and grey
+  gallery. Select a map to see every save for that map by round, player mode
+  or count, and date and time. The map artwork remains on the left and the
+  selected save's details appear on the right. Turn the mouse wheel over the
+  maps or save list to scroll; neither list shows a scrollbar.
+- The player panel shows points, weapons or loadout, revives, downs, and
+  kills for each player. The manager reads these from checkpoints when the
+  local FFmpeg LZO decoder is available. If a save cannot be decoded, use
+  **Edit player stats** to enter the details. Manual edits are stored in
+  `catalog.json` and never change the checkpoint file. Cooperative player
+  extraction still needs validation with a real cooperative checkpoint.
+- The manager starts watching when it opens. It makes a checkpoint when the
+  Zombies round-end signal fires, using the advancing round counter if that
+  signal was missed, and archives a
+  checkpoint made by pressing F11 in Black Ops. Opening the manager or starting
+  a saved game does not create an automatic save. There is no round
+  field or save-mode switch in the window. Black Ops needs to be in front when
+  the manager presses its F11 binding.
+- The window makes save files only after a completed round or when the player presses
+  F11. It does not make a rolling recovery checkpoint. An existing recovery
+  file from an older session can still be imported when the window opens.
+- The **Overwrite Game Saves** button beside **Pause co-op** shows a green check
+  when new round or F11 checkpoints replace the save you started. A red X
+  means those checkpoints are kept as separate saves. Its setting is saved
+  between manager sessions.
+- Select a checkpoint to see its details. **Favorites** filters the list.
+  **Delete** permanently removes the selected
+  checkpoint file after a confirmation.
+- Right-click a save for **Start Game**, **Rename Save Title**, **Favorite**,
+  and **Delete**. Start Game runs `launcher_ldr.exe game_mod.dll ../BlackOps.exe`
+  from the game's `bin` folder, passes the `Game Save` mod, checkpoint binds,
+  and selected map, then waits for the map's save system during its opening
+  screen. If Black Ops is already running, it
+  uses F10 to restart the selected map without closing the application, including when
+  the current map already matches.
+  The manager supports both the current and older F10 config paths and
+  reconnects if the map switch replaces the Black Ops process.
+  In Solo it presses F11,
+  retries during opening if the first key press was ignored, verifies the fresh
+  checkpoint, briefly suspends the game to restore the selected checkpoint,
+  then presses F12 to run `loadgame_continue`. The restored round is not
+  archived again; saving resumes on the next round or player F11. You can cancel
+  while it is preparing. A game launched before the new F10 binding was added
+  needs one restart through the manager to install that binding.
+- For **Co-op**, Start Game loads the map and shows a prompt. Let the same
+  players rejoin before choosing OK. The manager then
+  makes a fresh checkpoint with those players, restores the chosen save, and
+  presses F12. This path still needs a live cooperative test.
+- **Pause co-op** requests a script-controlled break for a new co-op game.
+  The game server stays running so remote players can remain connected. The
+  adapted GSC stops AI and spawning, freezes and protects joined players, and
+  shows a pause message. Click **Resume co-op** to restore play. The manager
+  pauses automatic saving during the break and resumes it afterward. F8 in
+  Black Ops also requests resume if the manager window is unavailable.
+  The script never resets the zombie count or rewrites the round timer.
+- The bottom-left **FoV** controls set the horizontal field of view (1–360)
+  and FoV scale (1.00–2.00). Click **FoV Off** to turn continuous updates on;
+  click **FoV On** to stop them. The manager reapplies the values after a map
+  change or reset while it is open. It writes only to the verified Black Ops
+  singleplayer process, which also hosts solo and co-op Zombies, never the
+  separate multiplayer executable. The pointer locations and refresh behavior
+  are adapted from [CoD SCZ FoV Changer](https://github.com/marvinlehmann/CoD-SCZ-FoV-Changer)
+  by Marvin Lehmann.
+- **Borderless window** at the bottom right sends the F7 binding, which runs
+  `r_fullscreen 0; r_noborder 1; vid_xpos 0; vid_ypos 0; vid_restart`.
+  The same button then becomes **Fullscreen window** and sends F6 for
+  `r_fullscreen 1; vid_restart`. Start Game loads these bindings automatically;
+  a game opened before this update needs to load the updated `checkpoint.cfg`
+  or restart through the manager once.
+- Existing checkpoints retain their original script checksums. Start Game
+  selects the exact pre-pause raw Zombies script kept in
+  `scriptdata/checkpoint_variants` for those saves, so the new co-op pause
+  feature is unavailable during those legacy sessions. New sessions use the
+  adapted GSC in `maps/_checkpoint_coop_pause.gsc`. Do not save during a
+  co-op break; the manager stops its watcher while paused. The original
+  `mod.ff` is also backed up in `checkpoint_saves/legacy_mod_backup`.
+- Press F11 in Black Ops whenever you want an extra saved game. The manager
+  archives it automatically; no button press in the window is needed.
+
+Save titles, favorites, game names, player details, and the overwrite choice are stored in
+`checkpoint_saves/catalog.json`. The `.bo1checkpoint` files contain the game
+state and are never rewritten when you rename or favorite a save. The list
+shows each save's round, Solo or player count when known, and timestamp.
+
+## Save each round
+
+1. Load the `Game Save` mod and start Zombies.
+2. Open the save manager. It watches Black Ops as soon as the window opens.
+   Start Game loads `checkpoint.cfg` with F10 for switching maps, F11 for
+   `devsave 1`, and F12 for `loadgame_continue`.
+3. If starting Black Ops outside the manager, run
+   `exec "mods/Game Save/checkpoint.cfg"` once in the game console.
+4. The companion briefly brings Black Ops to the front if needed and presses
+   F11 at the end of the round, waits for a new committed save ID, then
+   archives the game's save structure and both data buffers in
+   `checkpoint_saves/*.bo1checkpoint`. A `Saved round ...` message means the
+   capture succeeded. `python .\checkpoint.py list` shows the files. The
+   watcher can identify the map from the engine's committed checkpoint if
+   the LiveSplit scene address is unavailable on this Black Ops build.
+
+To use the PowerShell companion without the window, run
+`python .\checkpoint.py watch`. It uses the same round and F11 detection.
+
+To make the first archive directly, run `devsave 1` in the game console. Then
+run `python checkpoint.py capture` in PowerShell. This detects the round and
+reads the already committed checkpoint; it does not need the game
+to be in front. It also confirms the save filename and ID. Run
+`python checkpoint.py list` before trying `restore`.
+
+If `capture` rejects the checkpoint header, run `python checkpoint.py inspect`
+while the game is still open. It prints the map name, checksum, save filename,
+and state without changing memory; include that output when reporting the error.
+
+## Resume after closing Black Ops
+
+1. Stop `watch`. Start the same mod, same scripts, same map, and same player
+   setup. Let the round begin and ensure the game has made at least one fresh
+   checkpoint (F11 if necessary).
+2. Pause the solo game so gameplay actually stops. In PowerShell, run
+   `python checkpoint.py restore`. The companion checks that the server frame
+   and time counters stay still before writing. To use
+   another checkpoint, pass its full `.bo1checkpoint` path.
+3. The companion checks the executable, map checksum, script checksums and
+   checkpoint hashes before writing. It saves the running game's previous
+   checkpoint as `before-restore-*.bo1checkpoint`.
+4. Return to the game console and run `loadgame_continue` (or press F12).
+   Start `watch` again after the restored round begins with
+   `python checkpoint.py watch`; it detects the restored round automatically.
+
+If Windows denies memory access, the companion requests Administrator access
+through Windows and opens a new PowerShell window that stays open, including
+when the watcher reports an error. Continue there after the UAC prompt.
+The game and companion need the same privilege level. This is Windows process
+access, not a mod or script error.
+
+## Current verification limit
+
+The decompiled code shows that the engine serializes every client slot, so
+the captured memory includes the engine's cooperative client records. A
+round 2 solo checkpoint on `zombie_cod5_factory` was captured and restored
+successfully after a full game restart. The watcher also captured rounds 4
+and 5 in a live solo game, confirming an automatic save on a round change.
+Cooperative loading and remote-player reconnection are still unverified; do
+a short private test with the same host and players before relying on a long
+cooperative run. The new in-process F10 map switch has automated checks but
+still needs an in-game test.
+
+For a cooperative test, use the same host and let all players join before
+`devsave 1`. Capture with `python checkpoint.py capture`. On the next run,
+let those players join the same map and make a fresh `devsave 1`, then run
+`python checkpoint.py restore --coop` on the host. The cooperative pause menu
+does not stop the server, so this mode briefly suspends the host process while
+it replaces the checkpoint. After it resumes, run `loadgame_continue` on the
+host. Remote-player reconnection and their restored state need an in-game test.
+
+The old `.svg` archiver was invalid for Zombies and has been removed.

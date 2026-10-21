@@ -1,0 +1,8 @@
+*.gsc -text
+*.csc -text
+*.iwd -text
+*.ff -text
+*.dds -text
+*.png -text
+*.ico -text
+*.zip -text

@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+build/
+checkpoint_saves/
+engine/
+mods/
+release/*.exe
+release/*.zip
+release/SHA256SUMS.txt
+console.log
+devcommands.iwd.tmp*
+BlackOpsGameSave.ico
+game_mod.dll.c
+BlackOps-Lveez.asl
+autosplit_bo1zombies.asl
+.DS_Store
+Thumbs.db

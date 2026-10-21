@@ -1,0 +1,49 @@
+name: Build Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install build tool
+        run: python -m pip install pyinstaller==6.21.0
+      - name: Check source
+        run: |
+          python test_checkpoint_memory.py
+          python test_checkpoint_watch.py
+          python test_checkpoint_stats.py
+          python test_save_library.py
+          python test_game_save_installer.py
+          python test_game_launcher.py
+          python test_fov_keeper.py
+      - name: Build executables
+        run: python build_release.py
+      - name: Package release
+        run: python package_release.py $env:GITHUB_REF_NAME
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME
+          gh release create $version `
+            "release/BlackOpsGameSaves-$version-windows.zip" `
+            "release/BlackOpsGameSaves.exe" `
+            "release/InstallGameSaveMod.exe" `
+            "release/InstallBlackOpsGameSaves.exe" `
+            "release/SHA256SUMS.txt" `
+            --repo $env:GITHUB_REPOSITORY `
+            --verify-tag `
+            --title "Black Ops Game Saves $version" `
+            --notes-file RELEASE_NOTES.md
