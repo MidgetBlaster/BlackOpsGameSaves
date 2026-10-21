@@ -16,6 +16,7 @@ import zipfile
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import checkpoint_memory as core
+import display_mode
 import fov_keeper
 import game_launcher
 import game_save_installer
@@ -42,6 +43,7 @@ MAP_ART = {
     "zombie_cod5_sumpf": ("Shi No Numa", "loadscreen_zombie_sumpf_mini"),
     "zombie_cod5_factory": ("Der Riese", "loadscreen_zombie_factory_mini"),
 }
+DISPLAY_MODES = ("Windowed", "Fullscreen", "Borderless")
 
 
 def map_title(map_name: str) -> str:
@@ -185,8 +187,13 @@ class CheckpointApp(tk.Tk):
         self.busy = False
         self.closing = False
         self.launch_after_close = None
-        self.display_borderless = False
         self.display_pid = None
+        self.display_applied_mode = None
+        self.display_working = False
+        self.display_last_attempt = 0.0
+        preferred_display = self.library.data.get("display_mode", "Borderless")
+        self.display_mode = tk.StringVar(value=preferred_display if preferred_display in DISPLAY_MODES
+                                         else "Borderless")
         self.fov_stop = threading.Event()
         try:
             fov, scale = fov_keeper.validate_settings(
@@ -245,6 +252,7 @@ class CheckpointApp(tk.Tk):
         self.fov_thread = threading.Thread(target=self._fov_loop, daemon=True)
         self.fov_thread.start()
         self.after(100, self._poll_events)
+        self.after(1500, self._ensure_display_mode)
         self.protocol("WM_DELETE_WINDOW", self.close)
 
     def _build(self):
@@ -386,9 +394,11 @@ class CheckpointApp(tk.Tk):
         self.install_button = ttk.Button(actions, text="Install Game Save mod",
                                          command=self.install_mod)
         self.install_button.pack(side="right")
-        self.display_button = ttk.Button(actions, text="Borderless window",
-                                         command=self.toggle_display)
-        self.display_button.pack(side="right", padx=(0, 8))
+        self.display_box = ttk.Combobox(actions, textvariable=self.display_mode,
+                                        values=DISPLAY_MODES, state="readonly", width=11)
+        self.display_box.pack(side="right", padx=(0, 8))
+        self.display_box.bind("<<ComboboxSelected>>", self._select_display_mode)
+        ttk.Label(actions, text="Display").pack(side="right", padx=(0, 5))
 
         status_frame = tk.Frame(self, bg=SURFACE, padx=19, pady=11)
         status_frame.pack(fill="x")
@@ -533,34 +543,77 @@ class CheckpointApp(tk.Tk):
             if game is not None:
                 game.close()
 
-    def toggle_display(self):
-        if self.busy:
+    def _select_display_mode(self, _event=None):
+        mode = self.display_mode.get()
+        if mode not in DISPLAY_MODES:
+            return
+        self.library.data["display_mode"] = mode
+        self.library.write()
+        self.display_applied_mode = None
+        self._request_display_mode(manual=True)
+
+    def _request_display_mode(self, *, manual: bool = False):
+        if self.closing or self.busy or self.display_working:
+            if manual:
+                self.status.set(f"{self.display_mode.get()} saved. It will apply after the current task finishes.")
             return
         pid = core.game_pid()
         if pid is None:
-            messagebox.showinfo("Start Black Ops", "Start Black Ops before changing its display mode.", parent=self)
+            if manual:
+                self.status.set(f"{self.display_mode.get()} saved. It will apply when Black Ops starts.")
             return
-        if pid != self.display_pid:
-            self.display_borderless = False
-        borderless = not self.display_borderless
-        self._set_busy(True)
-        self.status.set("Switching Black Ops to borderless window..." if borderless else
-                        "Switching Black Ops to fullscreen...")
+        mode = self.display_mode.get()
+        self.display_working = True
+        self.display_last_attempt = time.monotonic()
+        self.status.set(f"Switching Black Ops to {mode.lower()}...")
 
         def work():
             game = None
             try:
                 game = core.GameProcess(pid)
-                game_launcher.wait_for_focus(game)
-                game.press_game_key(0x76 if borderless else 0x75,
-                                    "F7 borderless" if borderless else "F6 fullscreen")
-                self.events.put(("display_changed", borderless, pid))
+                if mode == "Borderless":
+                    if display_mode.is_fullscreen(pid):
+                        game_launcher.wait_for_focus(game)
+                        game.press_game_key(0x76, "F7 windowed mode")
+                        display_mode.wait_for_windowed(pid)
+                    if not display_mode.is_borderless(pid):
+                        display_mode.make_borderless(pid)
+                elif mode == "Fullscreen":
+                    if not display_mode.is_fullscreen(pid):
+                        game_launcher.wait_for_focus(game)
+                        game.press_game_key(0x75, "F6 fullscreen")
+                        display_mode.wait_for_fullscreen(pid)
+                elif display_mode.is_fullscreen(pid) or display_mode.is_borderless(pid):
+                    game_launcher.wait_for_focus(game)
+                    game.press_game_key(0x76, "F7 windowed mode")
+                    display_mode.wait_for_windowed(pid)
+                self.events.put(("display_changed", mode, pid))
             except Exception as error:
-                self.events.put(("display_error", str(error)))
+                self.events.put(("display_error", str(error), mode, pid, manual))
             finally:
                 if game is not None:
                     game.close()
         threading.Thread(target=work, daemon=False).start()
+
+    def _ensure_display_mode(self):
+        if self.closing:
+            return
+        try:
+            if not self.busy and not self.display_working:
+                pid = core.game_pid()
+                if pid is not None and time.monotonic() - self.display_last_attempt >= 5:
+                    mode = self.display_mode.get()
+                    matches = ((mode == "Borderless" and display_mode.is_borderless(pid)) or
+                               (mode == "Fullscreen" and display_mode.is_fullscreen(pid)) or
+                               (mode == "Windowed" and not display_mode.is_fullscreen(pid) and
+                                not display_mode.is_borderless(pid)))
+                    if not matches:
+                        self._request_display_mode()
+                    else:
+                        self.display_pid, self.display_applied_mode = pid, mode
+        except (OSError, RuntimeError):
+            pass  # The game window may be recreated while the map loads.
+        self.after(2000, self._ensure_display_mode)
 
     def refresh(self):
         self.library.scan()
@@ -1104,18 +1157,14 @@ class CheckpointApp(tk.Tk):
                     if self.fov_enabled:
                         self.status.set(f"FoV changer: {event[1]}")
                 elif kind == "display_error":
-                    self._set_busy(False)
+                    self.display_working = False
                     self.status.set(f"Could not change display mode: {event[1]}")
-                    messagebox.showerror("Display mode", event[1], parent=self)
-                    self._start_watch()
+                    if event[4]:
+                        messagebox.showerror("Display mode", event[1], parent=self)
                 elif kind == "display_changed":
-                    self.display_borderless, self.display_pid = event[1], event[2]
-                    self.display_button.configure(text="Fullscreen window" if event[1] else
-                                                  "Borderless window")
-                    self._set_busy(False)
-                    self.status.set("Borderless window requested." if event[1] else
-                                    "Fullscreen requested.")
-                    self._start_watch()
+                    self.display_working = False
+                    self.display_applied_mode, self.display_pid = event[1], event[2]
+                    self.status.set(f"{event[1]} display enabled.")
                 elif kind == "watch_round":
                     if not self.busy:
                         self.status.set(f"Watching round {event[1]}. Saving at round end; F11 saves manually.")

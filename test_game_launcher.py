@@ -15,8 +15,10 @@ assert command[3:6] == ["+set", "fs_game", f"mods/{core.ROOT.name}"]
 assert command[6:9] == ["+set", "scr_useFastFileOnly", "0"]
 assert command[9:11] == ["+exec", "checkpoint.cfg"]
 assert 'bind F10 "exec checkpoint_switch.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
-assert 'bind F7 "r_fullscreen 0; r_noborder 1; vid_xpos 0; vid_ypos 0; vid_restart"' in (core.ROOT / "checkpoint.cfg").read_text()
-assert 'bind F6 "r_fullscreen 1; vid_restart"' in (core.ROOT / "checkpoint.cfg").read_text()
+assert 'bind F7 "exec checkpoint_borderless.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
+assert 'bind F6 "exec checkpoint_fullscreen.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
+assert "r_fullscreen 0\nvid_restart" in (core.ROOT / "checkpoint_borderless.cfg").read_text()
+assert "r_fullscreen 1\nvid_restart" in (core.ROOT / "checkpoint_fullscreen.cfg").read_text()
 assert game_launcher.legacy_scripts({"script_checksums": [1547989158, 617289, 624409]})
 assert not game_launcher.legacy_scripts({"script_checksums": [1, 2, 3]})
 with TemporaryDirectory(dir=core.ROOT) as directory:

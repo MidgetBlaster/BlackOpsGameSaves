@@ -115,12 +115,15 @@ when missing or different, backing up any replaced files under
   separate multiplayer executable. The pointer locations and refresh behavior
   are adapted from [CoD SCZ FoV Changer](https://github.com/marvinlehmann/CoD-SCZ-FoV-Changer)
   by Marvin Lehmann.
-- **Borderless window** at the bottom right sends the F7 binding, which runs
-  `r_fullscreen 0; r_noborder 1; vid_xpos 0; vid_ypos 0; vid_restart`.
-  The same button then becomes **Fullscreen window** and sends F6 for
-  `r_fullscreen 1; vid_restart`. Start Game loads these bindings automatically;
-  a game opened before this update needs to load the updated `checkpoint.cfg`
-  or restart through the manager once.
+- The **Display** selector at the bottom right offers Windowed, Fullscreen,
+  and Borderless. Borderless is the default. The selection is remembered in the
+  save catalog and applied automatically when Black Ops starts. Borderless
+  switches the retail game to windowed mode with F7 when needed, then removes
+  its frame and sizes the window to the current monitor. The retail game does
+  not support `r_noborder`. Fullscreen uses F6; Windowed uses F7. The manager
+  checks the resulting window before showing success. Start Game loads these
+  bindings automatically; a game opened before this update needs to load the
+  updated `checkpoint.cfg` or restart through the manager once.
 - Existing checkpoints retain their original script checksums. Start Game
   selects the exact pre-pause raw Zombies script kept in
   `scriptdata/checkpoint_variants` for those saves, so the new co-op pause
