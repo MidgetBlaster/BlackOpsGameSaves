@@ -1,5 +1,7 @@
 # Black Ops Game Saves
 
+Save and restore your checkpoint saves in Black Ops Zombies.
+
 A Windows save manager for Call of Duty: Black Ops Zombies. It copies in-memory
 Zombies checkpoints to files after rounds and lets you resume a selected save
 later. The manager supports Solo and Co-op checkpoints, map artwork, player
@@ -55,12 +57,14 @@ python test_game_launcher.py
 python test_fov_keeper.py
 ```
 
-## First push
+## Publishing
 
 This checkout is prepared for `https://github.com/MidgetBlast/BlackOpsGameSaves`.
-The annotated `v1.0.0` tag triggers the Windows build and GitHub Release.
-After reviewing the initial commit, publish the branch and tag with:
+The annotated `v1.0.0` tag is already on GitHub. Publish the merged branch with:
 
 ```powershell
-git push -u origin main --follow-tags
+git push -u origin main
 ```
+
+The first branch push runs the Windows release workflow using the existing
+`v1.0.0` tag. Later version tags also start release builds.
