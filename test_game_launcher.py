@@ -106,15 +106,6 @@ with patch.object(core.time, "sleep") as delay:
 assert sent_flags == [8, 10]
 delay.assert_called_once_with(0.06)
 assert ctypes.sizeof(core.INPUT) == 40
-wheel_events = []
-def capture_wheel(count, event, size):
-    sent = ctypes.cast(event, ctypes.POINTER(core.INPUT)).contents
-    wheel_events.append((sent.type, sent.data.mi.mouseData, sent.data.mi.dwFlags))
-    return 1
-
-key_game.user.SendInput = capture_wheel
-key_game.select_previous_weapon()
-assert wheel_events == [(0, 120, 0x0800)]
 
 
 class FreshGame:
@@ -166,11 +157,9 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore"),
       patch.object(game_launcher, "wait_for_focus"),
-      patch.object(game_launcher, "wait_for_loaded_round", return_value=True) as loaded,
-      patch.object(fresh_game, "select_previous_weapon", create=True) as weapon):
+      patch.object(game_launcher, "wait_for_loaded_round", return_value=True) as loaded):
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
 loaded.assert_called_once_with(fresh_game, 4, None)
-weapon.assert_called_once()
 
 
 class SwitchGame:

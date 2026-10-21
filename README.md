@@ -26,6 +26,8 @@ The manager needs Administrator access to read and write the game's memory.
 It watches rounds while open. Press F11 in the game for an extra manual save.
 Use **Export selected** or **Export all** to create a `.bo1gamesave` file and
 **Import saves** on another machine to add it to the Imported saves view.
+In a map's save list, hold Shift to select a range or Ctrl to select individual
+saves, then choose **Export selected** or **Delete selected**.
 
 The compatible game executable has SHA-256
 `1141278c4599025c85d0e27d1629a5e8ecb0568559c4d9653e693018c3b25f1e`.
@@ -39,7 +41,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.0
+python package_release.py v1.0.5
 ```
 
 The build script produces `BlackOpsGameSaves.exe`, `InstallGameSaveMod.exe`,
@@ -60,11 +62,12 @@ python test_fov_keeper.py
 ## Publishing
 
 This checkout is prepared for `https://github.com/MidgetBlast/BlackOpsGameSaves`.
-The annotated `v1.0.0` tag is already on GitHub. Publish the merged branch with:
+Push the prepared branch and release tag with:
 
 ```powershell
 git push -u origin main
+git push origin v1.0.5
 ```
 
-The first branch push runs the Windows release workflow using the existing
-`v1.0.0` tag. Later version tags also start release builds.
+The tag push starts the Windows release workflow. The local release package is
+also available in `release/`.

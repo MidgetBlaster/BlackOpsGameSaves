@@ -52,8 +52,9 @@ when missing or different, backing up any replaced files under
 `Game Save` installation are kept. Later, open the manager with
 `mods/Game Save/Open Game Save.cmd`.
 
-- The first screen shows the supplied Zombies map artwork in a black and grey
-  gallery. Select a map to see every save for that map by title, round, player mode
+- The first screen shows the supplied Zombies map artwork in compact rows, with
+  each thumbnail to the left of its map title. Select a map to see every save
+  for that map by title, round, player mode
   or count, and date and time. The map artwork remains on the left and the
   selected save's details appear on the right. Turn the mouse wheel over the
   maps or save list to scroll; neither list shows a scrollbar.
@@ -89,9 +90,10 @@ when missing or different, backing up any replaced files under
   continuing a saved checkpoint. Automatic saves begin at the chosen round timing.
 - New checkpoints on a map receive titles Save Game 1, Save Game 2, and so on.
   Renamed titles remain unchanged, including when Overwrite Game Saves is on.
-- Select a checkpoint to see its details. **Favorites** filters the list.
-  **Delete** permanently removes the selected
-  checkpoint file after a confirmation.
+- Select a checkpoint to see its details. Hold **Shift** to select a range or
+  **Ctrl** to select individual saves. **Export selected** puts all selected
+  saves in one portable package; **Delete selected** removes them after one
+  confirmation. **Favorites** filters the list.
 - Right-click a save for **Start Game**, **Rename Save Title**, **Favorite**,
   and **Delete**. Start Game runs `launcher_ldr.exe game_mod.dll ../BlackOps.exe`
   from the game's `bin` folder, passes the `Game Save` mod, checkpoint binds,
@@ -105,7 +107,7 @@ when missing or different, backing up any replaced files under
   retries during opening if the first key press was ignored, verifies the fresh
   checkpoint, briefly suspends the game to restore the selected checkpoint,
   then presses F12 to run `loadgame_continue`. It waits for the saved round to
-  resume and selects the host's prior weapon with one wheel-up input. The restored round is not
+  resume. It does not send any weapon-switch input. The restored round is not
   archived again; saving resumes on the next round or player F11. You can cancel
   while it is preparing. A game launched before the new F10 binding was added
   needs one restart through the manager to install that binding.

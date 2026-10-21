@@ -26,8 +26,17 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directo
             file.writestr("manifest.json", json.dumps({
                 "format": 1, "map": "zombie_cod5_factory", "round": 5,
                 "saved_at": "2026-10-20T05:02:00-04:00"}))
+            file.writestr("save.bin", b"second checkpoint")
         catalog.scan()
         assert catalog.data["saves"][second.name]["title"] == "Save Game 2"
+        selected_package = catalog.export_saves([save.name, second.name], archive)
+        with zipfile.ZipFile(selected_package) as package:
+            assert len(json.loads(package.read("export.json"))["saves"]) == 2
+        imported_pair = catalog.import_saves(selected_package)
+        assert len(imported_pair) == 2
+        assert all(catalog.data["saves"][name]["imported"] for name in imported_pair)
+        for name in imported_pair:
+            catalog.delete_save(name)
         catalog.delete_save(second.name)
         with zipfile.ZipFile(second, "w") as file:
             file.writestr("manifest.json", json.dumps({

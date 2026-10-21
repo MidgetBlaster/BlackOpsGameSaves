@@ -1,10 +1,17 @@
-# Black Ops Game Saves v1.0.2
+# Black Ops Game Saves v1.0.5
+
+- Select several checkpoints with Shift or Ctrl, then export them in one
+  package or delete them together.
+- Shows maps as compact rows with the thumbnail beside the title.
+- Stops sending a weapon-switch input after loading a checkpoint.
+- Keeps the v1.0.4 recovery for stalled save requests after Continue.
+
+## v1.0.2
 
 - Adds End of Rounds, Round Transitions, and Start of Round auto save timing.
 - Adds Start New Game for the selected map without loading a checkpoint.
 - Names new saves Save Game 1, Save Game 2, and so on within each map.
-- Waits for the restored round before resuming automatic saves and selects the
-  host's prior weapon after Continue.
+- Waits for the restored round before resuming automatic saves.
 - Uses the local Steam persona for the host name and removes player stat editing.
 - Handles temporary save memory gaps while a map finishes loading.
 

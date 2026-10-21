@@ -311,19 +311,14 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
     # Start Game restores under a brief process suspension, so the pause menu
     # is closed and F12 reaches the engine's loadgame_continue binding.
     game.press_load()
-    if wait_for_loaded_round(game, metadata.get("round"), cancel):
-        # BO1 can place the host on the other owned weapon after Continue even
-        # though the checkpoint retains the correct loadout and active weapon.
-        # One wheel-up action selects the weapon the player reported as saved.
-        wait_for_focus(game, cancel)
-        game.select_previous_weapon()
+    wait_for_loaded_round(game, metadata.get("round"), cancel)
     return metadata
 
 
 def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
                           cancel: threading.Event | None = None,
                           timeout: float = 20) -> bool:
-    """Observe the resumed round before resuming the watcher or changing weapons."""
+    """Observe the resumed round before resuming the watcher."""
     if not saved_round:
         return False
     started = time.monotonic()

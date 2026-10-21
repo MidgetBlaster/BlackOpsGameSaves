@@ -224,6 +224,7 @@ class CheckpointApp(tk.Tk):
         self.map_heading = ttk.Label(top, text="", font=("Segoe UI", 17, "bold"))
         self.map_heading.pack(side="left")
         ttk.Button(top, text="Import saves", command=self.import_saves).pack(side="right")
+        ttk.Button(top, text="Delete selected", command=self.delete_save).pack(side="right")
         ttk.Button(top, text="Export selected", command=self.export_selected).pack(side="right", padx=(0, 8))
         filter_bar = ttk.Frame(self.saves_page)
         filter_bar.pack(fill="x", pady=(0, 10))
@@ -255,7 +256,7 @@ class CheckpointApp(tk.Tk):
         list_frame.pack(side="left", fill="both", expand=True, padx=(0, 14))
         tk.Label(list_frame, text="SAVED CHECKPOINTS", bg=SURFACE, fg=ACCENT,
                  font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 9))
-        self.tree = ttk.Treeview(list_frame, show="tree", selectmode="browse",
+        self.tree = ttk.Treeview(list_frame, show="tree", selectmode="extended",
                                  style="Checkpoint.Treeview")
         self.tree.column("#0", minwidth=320, width=490, stretch=True)
         self.tree.pack(fill="both", expand=True)
@@ -284,9 +285,9 @@ class CheckpointApp(tk.Tk):
         self.save_menu.add_command(label="Start Game", command=self.start_selected_game)
         self.save_menu.add_command(label="Rename Save Title", command=self.rename_save_title)
         self.save_menu.add_command(label="Favorite", command=self.favorite)
-        self.save_menu.add_command(label="Export Save", command=self.export_selected)
+        self.save_menu.add_command(label="Export selected", command=self.export_selected)
         self.save_menu.add_separator()
-        self.save_menu.add_command(label="Delete", command=self.delete_save)
+        self.save_menu.add_command(label="Delete selected", command=self.delete_save)
 
         actions = ttk.Frame(outer)
         self.actions = actions
@@ -565,7 +566,8 @@ class CheckpointApp(tk.Tk):
 
     def refresh(self):
         self.library.scan()
-        selected = self.selected_name()
+        selected = self.selected_names()
+        focused = self.tree.focus()
         self._render_gallery()
         self.tree.delete(*self.tree.get_children())
         if not self.current_map:
@@ -596,10 +598,14 @@ class CheckpointApp(tk.Tk):
                      f"    •    Round {entry['round']}    •    {people}"
                      f"    •    {save_date(entry.get('saved_at', ''))}")
             self.tree.insert("", "end", iid=name, text=title)
-        if selected and self.tree.exists(selected):
-            self.tree.selection_set(selected)
+        remaining = [name for name in selected if self.tree.exists(name)]
+        if remaining:
+            self.tree.selection_set(*remaining)
+            self.tree.focus(focused if focused in remaining else remaining[0])
         elif self.tree.get_children():
-            self.tree.selection_set(self.tree.get_children()[0])
+            first = self.tree.get_children()[0]
+            self.tree.selection_set(first)
+            self.tree.focus(first)
         self._render_details()
 
     def _render_gallery(self):
@@ -613,34 +619,35 @@ class CheckpointApp(tk.Tk):
         maps = list(MAP_ART) if self.category.get() != "Imported saves" else [
             name for name in MAP_ART if counts.get(name)]
         maps.extend(name for name in counts if name and name not in MAP_ART)
-        for col in range(4):
-            self.gallery_grid.columnconfigure(col, weight=1)
+        self.gallery_grid.columnconfigure(0, weight=1)
         for index, map_name in enumerate(maps):
-            row, column = divmod(index, 4)
-            card = tk.Frame(self.gallery_grid, bg=BG, width=220, height=184, cursor="hand2")
-            card.grid(row=row, column=column, padx=9, pady=9, sticky="n")
+            card = tk.Frame(self.gallery_grid, bg=SURFACE, height=76, cursor="hand2")
+            card.grid(row=index, column=0, padx=2, pady=2, sticky="ew")
             card.pack_propagate(False)
             art_name = MAP_ART.get(map_name, ("", None))[1]
             image_label = None
             if art_name:
                 try:
-                    if art_name not in self.map_images:
+                    key = f"list:{art_name}"
+                    if key not in self.map_images:
                         path = core.ROOT / "ui textures" / "png" / f"{art_name}.png"
-                        self.map_images[art_name] = tk.PhotoImage(file=str(path)).subsample(2, 2)
-                    image_label = tk.Label(card, image=self.map_images[art_name], bg=BG,
+                        self.map_images[key] = tk.PhotoImage(file=str(path)).subsample(4, 4)
+                    image_label = tk.Label(card, image=self.map_images[key], bg=SURFACE,
                                            cursor="hand2")
-                    image_label.pack(pady=(7, 2))
+                    image_label.pack(side="left", padx=(6, 12), pady=6)
                     image_label.bind("<Button-1>", lambda _event, key=map_name: self.show_map(key))
                 except tk.TclError:
                     pass
-            name_label = tk.Label(card, text=map_title(map_name), bg=BG, fg=TEXT,
+            text_frame = tk.Frame(card, bg=SURFACE, cursor="hand2")
+            text_frame.pack(side="left", fill="y")
+            name_label = tk.Label(text_frame, text=map_title(map_name), bg=SURFACE, fg=TEXT,
                                   font=("Segoe UI", 10, "bold"), cursor="hand2")
-            name_label.pack()
+            name_label.pack(anchor="w", pady=(12, 0))
             count = counts.get(map_name, 0)
-            count_label = tk.Label(card, text=f"{count} {'save' if count == 1 else 'saves'}",
-                                   bg=BG, fg=MUTED, font=("Segoe UI", 9), cursor="hand2")
-            count_label.pack(pady=(2, 0))
-            for widget in (card, name_label, count_label):
+            count_label = tk.Label(text_frame, text=f"{count} {'save' if count == 1 else 'saves'}",
+                                    bg=SURFACE, fg=MUTED, font=("Segoe UI", 9), cursor="hand2")
+            count_label.pack(anchor="w", pady=(2, 0))
+            for widget in (card, text_frame, name_label, count_label):
                 widget.bind("<Button-1>", lambda _event, key=map_name: self.show_map(key))
                 self._bind_wheel(widget, self._scroll_gallery)
             if image_label is not None:
@@ -700,7 +707,14 @@ class CheckpointApp(tk.Tk):
         for child in self.details.winfo_children():
             child.destroy()
         self.details_canvas.yview_moveto(0)
-        name = self.selected_name()
+        names = self.selected_names()
+        if len(names) > 1:
+            tk.Label(self.details, text=f"{len(names)} saves selected", bg=SURFACE, fg=TEXT,
+                     font=("Segoe UI", 16, "bold")).pack(anchor="w")
+            tk.Label(self.details, text="Use Export selected or Delete selected. Hold Shift to select a range, or Ctrl to select individual saves.",
+                     bg=SURFACE, fg=MUTED, wraplength=245, justify="left").pack(anchor="w", pady=(8, 0))
+            return
+        name = names[0] if names else None
         if not name or name not in self.library.data["saves"]:
             tk.Label(self.details, text="Select a checkpoint to see its details.", bg=SURFACE,
                      fg=MUTED, wraplength=245, justify="left").pack(anchor="w")
@@ -749,10 +763,18 @@ class CheckpointApp(tk.Tk):
             anchor="w", pady=(9, 0))
 
     def selected_name(self) -> str | None:
-        selection = self.tree.selection()
-        return selection[0] if selection else None
+        selection = self.selected_names()
+        focused = self.tree.focus()
+        return focused if focused in selection else (selection[0] if selection else None)
+
+    def selected_names(self) -> list[str]:
+        selected = set(self.tree.selection())
+        return [name for name in self.tree.get_children() if name in selected]
 
     def _selected(self) -> tuple[str, dict] | None:
+        if len(self.selected_names()) > 1:
+            messagebox.showinfo("Select one save", "Choose one save for this action.", parent=self)
+            return None
         name = self.selected_name()
         if not name:
             messagebox.showinfo("Select a save", "Select a save from the list first.", parent=self)
@@ -775,9 +797,9 @@ class CheckpointApp(tk.Tk):
         messagebox.showinfo("Export complete", f"Your portable save package is in:\n{destination}", parent=self)
 
     def export_selected(self):
-        name = self.selected_name()
-        if name:
-            self._export_names([name])
+        names = self.selected_names()
+        if names:
+            self._export_names(names)
         else:
             messagebox.showinfo("Export saves", "Select a save first.", parent=self)
 
@@ -801,7 +823,8 @@ class CheckpointApp(tk.Tk):
             messagebox.showerror("Import failed", str(error), parent=self)
             return
         self.category.set("Imported saves")
-        if self.current_map and not any(self.library.data[name].get("map") == self.current_map for name in added):
+        if self.current_map and not any(self.library.data["saves"][name].get("map") == self.current_map
+                                        for name in added):
             self.show_gallery()
         elif self.current_map:
             self.refresh()
@@ -814,10 +837,16 @@ class CheckpointApp(tk.Tk):
         row = self.tree.identify_row(event.y)
         if not row:
             return
-        self.tree.selection_set(row)
+        if row not in self.tree.selection():
+            self.tree.selection_set(row)
         self.tree.focus(row)
         entry = self.library.data["saves"][row]
+        multiple = len(self.selected_names()) > 1
+        for index in (0, 1, 2):
+            self.save_menu.entryconfigure(index, state="disabled" if multiple else "normal")
         self.save_menu.entryconfigure(2, label="Remove Favorite" if entry["favorite"] else "Favorite")
+        self.save_menu.entryconfigure(3, label=f"Export {len(self.selected_names())} selected" if multiple else "Export Save")
+        self.save_menu.entryconfigure(5, label=f"Delete {len(self.selected_names())} selected" if multiple else "Delete")
         try:
             self.save_menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -851,20 +880,30 @@ class CheckpointApp(tk.Tk):
     def delete_save(self):
         if self.busy:
             return
-        chosen = self._selected()
-        if not chosen:
+        names = self.selected_names()
+        if not names:
+            messagebox.showinfo("Select a save", "Select one or more saves first.", parent=self)
             return
-        name, entry = chosen
-        if messagebox.askyesno("Delete save", f"Permanently delete ‘{entry['title']}’?",
-                               parent=self):
-            try:
-                self.library.delete_save(name)
+        title = self.library.data["saves"][names[0]]["title"]
+        prompt = (f"Permanently delete {len(names)} selected saves?" if len(names) > 1 else
+                  f"Permanently delete ‘{title}’?")
+        if messagebox.askyesno("Delete saves", prompt, parent=self):
+            errors = []
+            deleted = 0
+            for name in names:
+                try:
+                    self.library.delete_save(name)
+                except OSError as error:
+                    errors.append(f"{name}: {error}")
+                    continue
+                deleted += 1
                 if self.started_save_name == name:
                     self.started_save_name = None
-                self.refresh()
-                self.status.set(f"Deleted {entry['title']}.")
-            except OSError as error:
-                messagebox.showerror("Delete failed", str(error), parent=self)
+            self.refresh()
+            if deleted:
+                self.status.set(f"Deleted {deleted} save{'s' if deleted != 1 else ''}.")
+            if errors:
+                messagebox.showerror("Delete failed", "Could not delete:\n" + "\n".join(errors), parent=self)
 
     def _mode_for_save(self, entry: dict) -> str | None:
         mode = entry.get("saved_mode") or self.library.profile(entry["profile_id"])["mode"]

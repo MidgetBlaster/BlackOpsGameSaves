@@ -244,17 +244,6 @@ class GameProcess:
     def press_coop_resume(self):
         self.press_game_key(0x77, "F8 co-op resume")
 
-    def select_previous_weapon(self):
-        """Use the game's existing wheel-up weapon binding after Continue."""
-        if not self.foreground():
-            raise RuntimeError("Bring Black Ops to the foreground before selecting the saved weapon")
-        event = INPUT()
-        event.type = 0  # INPUT_MOUSE
-        event.data.mi.mouseData = 120
-        event.data.mi.dwFlags = 0x0800  # MOUSEEVENTF_WHEEL
-        if self.user.SendInput(1, ctypes.byref(event), ctypes.sizeof(INPUT)) != 1:
-            raise OSError("Windows rejected the weapon selection input")
-
     def press_game_key(self, virtual_key: int, description: str):
         if not self.foreground():
             raise RuntimeError(f"Bring Black Ops to the foreground before requesting the {description} key")
