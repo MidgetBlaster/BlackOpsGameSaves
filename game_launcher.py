@@ -10,6 +10,7 @@ import threading
 import time
 
 import checkpoint_memory as core
+import steam_identity
 
 # Checksum set found in all checkpoints made before the co-op pause GSC was
 # added. These saves use the exact original raw source kept below.
@@ -57,11 +58,15 @@ def launch_command(map_name: str) -> tuple[list[str], Path]:
             raise FileNotFoundError(f"Required game file is missing: {path}")
     # The first three arguments are exactly the user's working loader command
     # from the bin directory. The loader forwards the remaining game arguments.
-    return ([str(launcher), "game_mod.dll", "../BlackOps.exe",
+    command = [str(launcher), "game_mod.dll", "../BlackOps.exe",
              "+set", "fs_game", mod_game_path(),
              "+set", "scr_useFastFileOnly", "0",
-             "+exec", "checkpoint.cfg",
-             "+devmap", map_name], folder)
+             "+exec", "checkpoint.cfg"]
+    persona = steam_identity.launch_name(core.GAME)
+    if persona:
+        command.extend(("+set", "name", persona))
+    command.extend(("+devmap", map_name))
+    return command, folder
 
 
 def _check_cancel(cancel: threading.Event | None):
@@ -171,13 +176,15 @@ def switch_running_map(game: core.GameProcess, map_name: str,
     compatibility_file = core.ROOT / "mods" / core.ROOT.name / "checkpoint_switch.cfg"
     compatibility_file.parent.mkdir(parents=True, exist_ok=True)
     temporary = switch_file.with_suffix(".cfg.tmp")
+    persona = steam_identity.launch_name(core.GAME)
     command = (
         f"set checkpoint_coop_pause 0\n"
         f"set scr_useFastFileOnly 0\n"
-        f"devmap {map_name}\n")
-    temporary.write_text(command, encoding="ascii")
+        + (f'set name "{persona}"\n' if persona else "")
+        + f"devmap {map_name}\n")
+    temporary.write_text(command, encoding="utf-8")
     os.replace(temporary, switch_file)
-    compatibility_file.write_text(command, encoding="ascii")
+    compatibility_file.write_text(command, encoding="utf-8")
     try:
         try:
             old_frame = game.u32(core.LEVEL_FRAME_ADDR)
@@ -304,7 +311,44 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
     # Start Game restores under a brief process suspension, so the pause menu
     # is closed and F12 reaches the engine's loadgame_continue binding.
     game.press_load()
+    if wait_for_loaded_round(game, metadata.get("round"), cancel):
+        # BO1 can place the host on the other owned weapon after Continue even
+        # though the checkpoint retains the correct loadout and active weapon.
+        # One wheel-up action selects the weapon the player reported as saved.
+        wait_for_focus(game, cancel)
+        game.select_previous_weapon()
     return metadata
+
+
+def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
+                          cancel: threading.Event | None = None,
+                          timeout: float = 20) -> bool:
+    """Observe the resumed round before resuming the watcher or changing weapons."""
+    if not saved_round:
+        return False
+    started = time.monotonic()
+    last_frame = None
+    stable = 0
+    while time.monotonic() - started < timeout:
+        _check_cancel(cancel)
+        try:
+            frame = game.u32(core.LEVEL_FRAME_ADDR)
+            menu = game.u32(core.MENU_ADDR)
+            observed = core.live_round(game)
+            if (menu == 0 and observed == saved_round and last_frame is not None
+                    and frame > last_frame and time.monotonic() - started >= 1.5):
+                stable += 1
+                if stable >= 3:
+                    return True
+            else:
+                stable = 0
+            last_frame = frame
+        except OSError as error:
+            if isinstance(error, PermissionError) or error.errno not in (299, 487, 998):
+                raise
+            stable = 0
+        time.sleep(0.25)
+    return False
 
 
 def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | None = None,
@@ -356,6 +400,54 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
             game.close()
             if report:
                 report("Black Ops switched processes during startup. Reconnecting to the game...")
+            game = wait_for_game(cancel, timeout=max(0, deadline - time.monotonic()),
+                                 write=True, suspend=True)
+        except BaseException:
+            game.close()
+            raise
+
+
+def start_new_game(map_name: str, cancel: threading.Event | None = None,
+                   report=None) -> core.GameProcess:
+    """Start a fresh map with the mod, without creating or loading a checkpoint."""
+    if not re.fullmatch(r"[A-Za-z0-9_]+", map_name):
+        raise ValueError("The selected map name is invalid")
+    running_pid = core.game_pid()
+    if running_pid:
+        if report:
+            report(f"Starting a new {map_name} game in Black Ops...")
+        game = core.GameProcess(running_pid, write=True, suspend=True)
+        try:
+            switch_running_map(game, map_name, cancel, legacy=False)
+            wait_for_map_ready(game, map_name, cancel, during_opening=False,
+                               allow_stale_checkpoint=True)
+            return game
+        except GameProcessReplaced:
+            game.close()
+            replacement = wait_for_replacement_game(running_pid, cancel)
+            try:
+                wait_for_map_ready(replacement, map_name, cancel)
+                return replacement
+            except BaseException:
+                replacement.close()
+                raise
+        except BaseException:
+            game.close()
+            raise
+    prepare_script_variant(legacy=False)
+    command, folder = launch_command(map_name)
+    if report:
+        report(f"Starting a new {map_name} game with the Game Save mod...")
+    subprocess.Popen(command, cwd=folder)
+    deadline = time.monotonic() + 180
+    game = wait_for_game(cancel, write=True, suspend=True)
+    while True:
+        try:
+            wait_for_map_ready(game, map_name, cancel,
+                               timeout=max(0, deadline - time.monotonic()))
+            return game
+        except GameProcessReplaced:
+            game.close()
             game = wait_for_game(cancel, timeout=max(0, deadline - time.monotonic()),
                                  write=True, suspend=True)
         except BaseException:

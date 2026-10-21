@@ -1,4 +1,14 @@
-# Black Ops Game Saves v1.0.0
+# Black Ops Game Saves v1.0.2
+
+- Adds End of Rounds, Round Transitions, and Start of Round auto save timing.
+- Adds Start New Game for the selected map without loading a checkpoint.
+- Names new saves Save Game 1, Save Game 2, and so on within each map.
+- Waits for the restored round before resuming automatic saves and selects the
+  host's prior weapon after Continue.
+- Uses the local Steam persona for the host name and removes player stat editing.
+- Handles temporary save memory gaps while a map finishes loading.
+
+## Initial release
 
 First packaged Windows release. Includes:
 

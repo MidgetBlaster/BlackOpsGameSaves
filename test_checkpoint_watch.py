@@ -116,6 +116,21 @@ assert tracker.update(204, 0, 300, 4, False, 0) is None
 assert tracker.update(204, 0, 301, 4, False, 6) is None
 assert tracker.update(204, 0, 302, 4, True, 7) is None
 assert tracker.update(204, 0, 303, 4, True, 7.2) == (4, 4, "round end")
+
+transition = core.RoundEndTracker("Round Transitions")
+assert transition.update(204, 0, 300, 4, False, 0) is None
+assert transition.update(204, 0, 301, 4, False, 6) is None
+assert transition.update(204, 0, 302, 4, True, 7) is None
+assert transition.update(204, 0, 303, 4, True, 7.5) is None
+assert transition.update(204, 0, 304, 4, True, 7.8) == (4, 4, "round transition")
+
+round_start = core.RoundEndTracker("Start of Round")
+assert round_start.update(204, 0, 300, 4, False, 0) is None
+assert round_start.update(204, 0, 301, 4, False, 6) is None
+assert round_start.update(204, 0, 302, 4, True, 7) is None
+assert round_start.update(204, 0, 303, 5, True, 8) is None
+assert round_start.update(204, 0, 304, 5, True, 9) is None
+assert round_start.update(204, 0, 305, 5, False, 10) == (5, 4, "round start")
 tracker.mark_saved(4)
 assert tracker.update(204, 0, 304, 4, False, 10) is None
 assert tracker.update(204, 0, 305, 5, False, 11) is None

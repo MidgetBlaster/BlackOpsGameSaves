@@ -21,6 +21,7 @@ import fov_keeper
 import game_launcher
 import game_save_installer
 from save_library import SaveLibrary
+import steam_identity
 
 
 BG = "#0d0d0d"
@@ -56,82 +57,6 @@ def save_date(value: str, *, long: bool = False) -> str:
         return date.strftime("%B %d, %Y at %I:%M %p" if long else "%b %d, %Y  %I:%M %p")
     except (TypeError, ValueError):
         return value or "Unknown date"
-
-
-class PlayerStatsDialog(tk.Toplevel):
-    """Edit display metadata for checkpoints whose player fields are not decoded."""
-
-    def __init__(self, parent, players: list[dict], count: int):
-        super().__init__(parent)
-        self.result = None
-        self.title("Player details")
-        self.configure(bg=BG)
-        self.transient(parent)
-        self.grab_set()
-        body = ttk.Frame(self, padding=20)
-        body.pack(fill="both", expand=True)
-        ttk.Label(body, text="Player details", font=("Segoe UI", 17, "bold")).pack(anchor="w")
-        ttk.Label(body, text="These details are stored with the save listing. The game checkpoint stays intact.").pack(anchor="w", pady=(2, 16))
-        controls = ttk.Frame(body)
-        controls.pack(anchor="w", pady=(0, 16))
-        ttk.Label(controls, text="Players").pack(side="left", padx=(0, 8))
-        self.count = tk.StringVar(value=str(max(1, min(4, count))))
-        count_box = ttk.Combobox(controls, textvariable=self.count, values=("1", "2", "3", "4"),
-                                 state="readonly", width=5)
-        count_box.pack(side="left")
-        count_box.bind("<<ComboboxSelected>>", lambda _event: self._update_rows())
-        table = ttk.Frame(body)
-        table.pack(fill="x")
-        specs = (("Player", 16), ("Points", 9), ("Weapons / loadout", 26),
-                 ("Revives", 8), ("Downs", 8), ("Kills", 8))
-        for column, (label, _width) in enumerate(specs):
-            ttk.Label(table, text=label).grid(row=0, column=column, sticky="w", padx=(0, 8))
-        self.rows = []
-        self.vars = []
-        for number in range(4):
-            values = players[number] if number < len(players) else {}
-            vars_for_row = {}
-            cells = []
-            for column, (key, width) in enumerate((("name", 16), ("points", 9), ("weapons", 26),
-                                                    ("revives", 8), ("downs", 8), ("kills", 8))):
-                value = values.get(key)
-                variable = tk.StringVar(value=str(value) if value is not None else
-                                        (f"Player {number + 1}" if key == "name" else ""))
-                widget = ttk.Entry(table, textvariable=variable, width=width)
-                widget.grid(row=number + 1, column=column, padx=(0, 8), pady=(5, 8), sticky="ew")
-                vars_for_row[key] = variable
-                cells.append(widget)
-            self.rows.append(cells)
-            self.vars.append(vars_for_row)
-        buttons = ttk.Frame(body)
-        buttons.pack(anchor="e", pady=(16, 0))
-        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="left", padx=(0, 8))
-        ttk.Button(buttons, text="Save details", command=self.accept).pack(side="left")
-        self._update_rows()
-        self.bind("<Escape>", lambda _event: self.destroy())
-        self.wait_window()
-
-    def _update_rows(self):
-        count = int(self.count.get())
-        for index, cells in enumerate(self.rows):
-            for widget in cells:
-                (widget.grid if index < count else widget.grid_remove)()
-
-    def accept(self):
-        result = []
-        for row in self.vars[:int(self.count.get())]:
-            item = {key: var.get().strip() for key, var in row.items()}
-            for key in ("points", "revives", "downs", "kills"):
-                if item[key]:
-                    if not item[key].isdigit():
-                        messagebox.showerror("Check player details", f"{key.title()} must be a nonnegative number.", parent=self)
-                        return
-                    item[key] = int(item[key])
-                else:
-                    item[key] = None
-            result.append(item)
-        self.result = result
-        self.destroy()
 
 
 def launch_as_administrator() -> bool:
@@ -215,6 +140,9 @@ class CheckpointApp(tk.Tk):
             except (OSError, RuntimeError) as error:
                 self.status.set(f"Could not prepare the pause script: {error}")
         self.save_policy = tk.StringVar(value=self.library.data.get("save_policy", "Keep new saves"))
+        preferred_timing = self.library.data.get("save_timing", core.SAVE_TIMINGS[0])
+        self.save_timing = tk.StringVar(value=preferred_timing if preferred_timing in core.SAVE_TIMINGS
+                                        else core.SAVE_TIMINGS[0])
         self.configure(background=BG)
         style = ttk.Style(self)
         style.theme_use("clam")
@@ -318,6 +246,9 @@ class CheckpointApp(tk.Tk):
                                              font=("Segoe UI", 16, "bold"),
                                              wraplength=255, justify="left")
         self.selected_map_caption.pack(anchor="nw")
+        self.start_new_button = ttk.Button(map_preview, text="Start New Game",
+                                            command=self.start_new_game)
+        self.start_new_button.pack(anchor="nw", pady=(12, 0))
         info_content = ttk.Frame(content)
         info_content.pack(side="left", fill="both", expand=True)
         list_frame = tk.Frame(info_content, bg=SURFACE, padx=14, pady=14)
@@ -353,7 +284,6 @@ class CheckpointApp(tk.Tk):
         self.save_menu.add_command(label="Start Game", command=self.start_selected_game)
         self.save_menu.add_command(label="Rename Save Title", command=self.rename_save_title)
         self.save_menu.add_command(label="Favorite", command=self.favorite)
-        self.save_menu.add_command(label="Edit Player Stats", command=self.edit_player_stats)
         self.save_menu.add_command(label="Export Save", command=self.export_selected)
         self.save_menu.add_separator()
         self.save_menu.add_command(label="Delete", command=self.delete_save)
@@ -369,36 +299,41 @@ class CheckpointApp(tk.Tk):
                                           bd=0, highlightthickness=0, cursor="hand2")
         self.overwrite_button.pack(side="left", padx=(8, 0))
         self._update_overwrite_button()
+        self.auto_save_button = ttk.Button(actions, command=self.toggle_save_timing)
+        self.auto_save_button.pack(side="left", padx=(8, 0))
+        self._update_auto_save_button()
         self.cancel_start_button = ttk.Button(actions, text="Cancel start", command=self.cancel_start,
                                                state="disabled")
         self.cancel_start_button.pack(side="left", padx=(8, 0))
-        ttk.Label(actions, text="FoV").pack(side="left", padx=(12, 4))
-        self.fov_entry = ttk.Spinbox(actions, from_=1, to=360, increment=1,
+        options = ttk.Frame(outer)
+        options.pack(fill="x", pady=(0, 10))
+        ttk.Label(options, text="FoV").pack(side="left", padx=(0, 4))
+        self.fov_entry = ttk.Spinbox(options, from_=1, to=360, increment=1,
                                       textvariable=self.fov_value, width=4,
                                       command=self._commit_fov)
         self.fov_entry.pack(side="left")
-        ttk.Label(actions, text="Scale").pack(side="left", padx=(6, 4))
-        self.fov_scale_entry = ttk.Spinbox(actions, from_=1.0, to=2.0, increment=0.05,
+        ttk.Label(options, text="Scale").pack(side="left", padx=(6, 4))
+        self.fov_scale_entry = ttk.Spinbox(options, from_=1.0, to=2.0, increment=0.05,
                                             textvariable=self.fov_scale, width=4,
                                             command=self._commit_fov)
         self.fov_scale_entry.pack(side="left")
         for field in (self.fov_entry, self.fov_scale_entry):
             field.bind("<Return>", self._commit_fov)
             field.bind("<FocusOut>", self._commit_fov)
-        self.fov_button = tk.Button(actions, command=self.toggle_fov,
+        self.fov_button = tk.Button(options, command=self.toggle_fov,
                                     bg=PANEL, activebackground="#383838",
                                     font=("Segoe UI", 10, "bold"), padx=10, pady=7,
                                     bd=0, highlightthickness=0, cursor="hand2")
         self.fov_button.pack(side="left", padx=(6, 0))
         self._update_fov_button()
-        self.install_button = ttk.Button(actions, text="Install Game Save mod",
+        self.install_button = ttk.Button(options, text="Install Game Save mod",
                                          command=self.install_mod)
         self.install_button.pack(side="right")
-        self.display_box = ttk.Combobox(actions, textvariable=self.display_mode,
+        self.display_box = ttk.Combobox(options, textvariable=self.display_mode,
                                         values=DISPLAY_MODES, state="readonly", width=11)
         self.display_box.pack(side="right", padx=(0, 8))
         self.display_box.bind("<<ComboboxSelected>>", self._select_display_mode)
-        ttk.Label(actions, text="Display").pack(side="right", padx=(0, 5))
+        ttk.Label(options, text="Display").pack(side="right", padx=(0, 5))
 
         status_frame = tk.Frame(self, bg=SURFACE, padx=19, pady=11)
         status_frame.pack(fill="x")
@@ -444,6 +379,19 @@ class CheckpointApp(tk.Tk):
         self.status.set("New checkpoints will overwrite the started save." if
                         self.save_policy.get() == "Replace started save" else
                         "New checkpoints will be kept as separate saves.")
+
+    def _update_auto_save_button(self):
+        self.auto_save_button.configure(text=f"Auto Save Settings: {self.save_timing.get()}")
+
+    def toggle_save_timing(self):
+        current = core.SAVE_TIMINGS.index(self.save_timing.get())
+        self.save_timing.set(core.SAVE_TIMINGS[(current + 1) % len(core.SAVE_TIMINGS)])
+        self.library.data["save_timing"] = self.save_timing.get()
+        self.library.write()
+        self._update_auto_save_button()
+        self.status.set(f"Automatic checkpoints will save at: {self.save_timing.get().lower()}.")
+        if self.watch_stop:
+            self.watch_stop.set()
 
     def install_mod(self):
         if self.busy:
@@ -644,8 +592,9 @@ class CheckpointApp(tk.Tk):
                 mode = "Solo" if count == 1 else "Co-op"
             people = "Solo" if mode == "Solo" else (f"{count} players" if count else
                      ("Co-op" if mode == "Co-op" else "Players unknown"))
-            title = (f"{'★  ' if entry['favorite'] else ''}Round {entry['round']}"
-                     f"    •    {people}    •    {save_date(entry.get('saved_at', ''))}")
+            title = (f"{'★  ' if entry['favorite'] else ''}{entry.get('title', 'Save Game')}"
+                     f"    •    Round {entry['round']}    •    {people}"
+                     f"    •    {save_date(entry.get('saved_at', ''))}")
             self.tree.insert("", "end", iid=name, text=title)
         if selected and self.tree.exists(selected):
             self.tree.selection_set(selected)
@@ -723,6 +672,30 @@ class CheckpointApp(tk.Tk):
         self.gallery_page.pack(fill="both", expand=True, before=self.actions)
         self.refresh()
 
+    def start_new_game(self):
+        if self.busy or not self.current_map:
+            return
+        map_name = self.current_map
+        self.start_cancel = threading.Event()
+        self.cancel_start_button.configure(state="normal")
+        self._set_busy(True)
+        self.status.set(f"Starting a new {map_title(map_name)} game...")
+
+        def work():
+            self._resume_coop_if_needed()
+            if self.watch_stop:
+                self.watch_stop.set()
+            if self.watch_thread and self.watch_thread.is_alive():
+                self.watch_thread.join()
+            game = game_launcher.start_new_game(
+                map_name, self.start_cancel,
+                lambda message: self.events.put(("startup_status", message)))
+            try:
+                self.events.put(("new_game_started", map_name))
+            finally:
+                game.close()
+        self._start_worker(work)
+
     def _render_details(self):
         for child in self.details.winfo_children():
             child.destroy()
@@ -735,7 +708,7 @@ class CheckpointApp(tk.Tk):
         entry = self.library.data["saves"][name]
         profile = next((p for p in self.library.profiles() if p["id"] == entry["profile_id"]),
                        self.library.profiles()[0])
-        title = f"Round {entry.get('round', '?')}"
+        title = entry.get("title") or "Save Game"
         tk.Label(self.details, text=title, bg=SURFACE, fg=TEXT,
                  font=("Segoe UI", 19, "bold")).pack(anchor="w")
         tk.Label(self.details, text=save_date(entry.get("saved_at", ""), long=True),
@@ -743,7 +716,7 @@ class CheckpointApp(tk.Tk):
         count = entry.get("player_count") or len(entry.get("players", []))
         mode = entry.get("saved_mode") or profile["mode"]
         description = "Solo · 1 player" if mode == "Solo" else (f"{count} players" if count else mode)
-        for line in (description, profile["title"], f"Save title: {entry.get('title', 'Saved game')}"):
+        for line in (f"Round {entry.get('round', '?')}", description, profile["title"]):
             tk.Label(self.details, text=line, bg=SURFACE, fg=MUTED, font=("Segoe UI", 10),
                      wraplength=245, justify="left").pack(anchor="w", pady=(0, 4))
         tk.Frame(self.details, bg=BORDER, height=1).pack(fill="x", pady=(11, 12))
@@ -757,7 +730,11 @@ class CheckpointApp(tk.Tk):
         for index, player in enumerate(players, 1):
             player_frame = tk.Frame(self.details, bg=PANEL, padx=10, pady=8)
             player_frame.pack(fill="x", pady=(0, 8))
-            tk.Label(player_frame, text=player.get("name") or f"Player {index}", bg=PANEL,
+            player_name = player.get("name") or f"Player {index}"
+            if (index == 1 and not entry.get("imported") and
+                    player_name.casefold().startswith("unknown soldier")):
+                player_name = steam_identity.local_persona_name(core.GAME) or player_name
+            tk.Label(player_frame, text=player_name, bg=PANEL,
                      fg=TEXT, font=("Segoe UI", 10, "bold")).pack(anchor="w")
             def value(key):
                 result = player.get(key)
@@ -770,8 +747,6 @@ class CheckpointApp(tk.Tk):
                      justify="left").pack(anchor="w", pady=(2, 0))
         ttk.Button(self.details, text="Start Game", command=self.start_selected_game).pack(
             anchor="w", pady=(9, 0))
-        ttk.Button(self.details, text="Edit player stats", command=self.edit_player_stats).pack(
-            anchor="w", pady=(7, 0))
 
     def selected_name(self) -> str | None:
         selection = self.tree.selection()
@@ -864,23 +839,6 @@ class CheckpointApp(tk.Tk):
         self.library.edit_save(name, title=title, profile_id=entry["profile_id"],
                                kind=entry["kind"], favorite=entry["favorite"])
         self.refresh()
-
-    def edit_player_stats(self):
-        if self.busy:
-            return
-        chosen = self._selected()
-        if not chosen:
-            return
-        name, entry = chosen
-        mode = self.library.profile(entry["profile_id"])["mode"]
-        count = entry.get("player_count") or len(entry.get("players", [])) or (1 if mode == "Solo" else 2)
-        dialog = PlayerStatsDialog(self, entry.get("players") or [], count)
-        if dialog.result is not None:
-            try:
-                self.library.set_player_stats(name, dialog.result)
-                self.refresh()
-            except (ValueError, OSError) as error:
-                messagebox.showerror("Could not save player details", str(error), parent=self)
 
     def favorite(self):
         if self.busy:
@@ -1087,6 +1045,7 @@ class CheckpointApp(tk.Tk):
             return
         self.watch_stop = threading.Event()
         skip_round = self.skip_initial_round
+        save_timing = self.save_timing.get()
 
         def work():
             try:
@@ -1102,7 +1061,8 @@ class CheckpointApp(tk.Tk):
                     elif event == "error":
                         self.events.put(("watch_error", _round))
                 core.watch(None, self.watch_stop, callback, self.save_lock,
-                           skip_initial_round=skip_round, enable_recovery=False)
+                           skip_initial_round=skip_round, enable_recovery=False,
+                           save_timing=save_timing)
             except Exception as error:
                 self.events.put(("watch_error", str(error)))
             finally:
@@ -1167,7 +1127,7 @@ class CheckpointApp(tk.Tk):
                     self.status.set(f"{event[1]} display enabled.")
                 elif kind == "watch_round":
                     if not self.busy:
-                        self.status.set(f"Watching round {event[1]}. Saving at round end; F11 saves manually.")
+                        self.status.set(f"Watching round {event[1]}. Auto save: {self.save_timing.get().lower()}; F11 saves manually.")
                 elif kind == "watch_end":
                     self.status.set(f"Round {event[1]} ended. Saving checkpoint…")
                 elif kind == "watch_stopped":
@@ -1203,7 +1163,20 @@ class CheckpointApp(tk.Tk):
                     self._set_busy(False)
                     self.library.set_active_profile(profile_id)
                     self.refresh()
-                    self.status.set(f"Loaded {title}. Next automatic save is at the end of this round; F11 saves manually.")
+                    self.status.set(f"Loaded {title}. Auto save: {self.save_timing.get().lower()}; F11 saves manually.")
+                    self._start_watch()
+                elif kind == "new_game_started":
+                    map_name = event[1]
+                    self.started_save_name = None
+                    self.skip_initial_round = None
+                    self.current_session_legacy = False
+                    self.start_cancel = None
+                    self.cancel_start_button.configure(state="disabled")
+                    self.library.new_profile(
+                        f"{map_title(map_name)} · {datetime.now():%b %d, %Y %I:%M %p}", "Solo")
+                    self._set_busy(False)
+                    self.refresh()
+                    self.status.set(f"New {map_title(map_name)} game started. Auto save: {self.save_timing.get().lower()}.")
                     self._start_watch()
                 elif kind == "restored":
                     self.status.set(f"Restored {event[1]}. Switch to Black Ops within 15 seconds; the UI will press F12 to continue.")

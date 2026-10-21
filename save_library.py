@@ -8,6 +8,7 @@ import hashlib
 import io
 import os
 from pathlib import Path
+import re
 import struct
 from uuid import uuid4
 import zipfile
@@ -68,10 +69,13 @@ class SaveLibrary:
             self.data = {"format": 1, "active_profile": "imported",
                          "profiles": [{"id": "imported", "title": "Imported saves", "mode": "Unknown"}],
                          "saves": {}}
+        self.data.setdefault("next_save_number_by_map", {})
         renamed = False
-        for entry in self.data["saves"].values():
-            if entry.get("title") == f"{entry.get('map')} - Round {entry.get('round')}":
-                entry["title"] = "Saved game"
+        for entry in sorted(self.data["saves"].values(),
+                            key=lambda item: item.get("saved_at", "")):
+            if entry.get("title") in (None, "Saved game", "Save Game") or \
+                    entry.get("title") == f"{entry.get('map')} - Round {entry.get('round')}":
+                entry["title"] = self._default_title(entry.get("map", ""))
                 renamed = True
         if renamed:
             self.write()
@@ -82,6 +86,18 @@ class SaveLibrary:
         temporary = self.path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(self.data, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(temporary, self.path)
+
+    def _default_title(self, map_name: str) -> str:
+        """Assign a stable, increasing title within one map's save list."""
+        counters = self.data.setdefault("next_save_number_by_map", {})
+        highest = max((int(match.group(1)) for entry in self.data["saves"].values()
+                       if entry.get("map") == map_name
+                       for match in [re.fullmatch(r"Save Game (\d+)",
+                                                  str(entry.get("title", "")))] if match),
+                      default=0)
+        number = max(int(counters.get(map_name, 1)), highest + 1)
+        counters[map_name] = number + 1
+        return f"Save Game {number}"
 
     def scan(self):
         changed = False
@@ -102,7 +118,7 @@ class SaveLibrary:
                 continue
             try:
                 details = checkpoint_details(path)
-                label = "Saved game"
+                label = self._default_title(details["map"])
                 error = ""
             except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
                 details = {"map": "", "round": 0, "saved_at": datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat()}
@@ -171,9 +187,9 @@ class SaveLibrary:
         entry.update(profile_id=profile_id, kind=kind, error="",
                      file_mtime_ns=target.stat().st_mtime_ns)
         if title is not None:
-            entry["title"] = title.strip() or "Saved game"
-        else:
-            entry.setdefault("title", "Saved game")
+            entry["title"] = title.strip() or self._default_title(details["map"])
+        elif not entry.get("title"):
+            entry["title"] = self._default_title(details["map"])
         entry.setdefault("favorite", False)
         populate_player_stats(target, entry)
         self.data["saves"][target.name] = entry

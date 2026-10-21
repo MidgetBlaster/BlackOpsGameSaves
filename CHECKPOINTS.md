@@ -53,16 +53,15 @@ when missing or different, backing up any replaced files under
 `mods/Game Save/Open Game Save.cmd`.
 
 - The first screen shows the supplied Zombies map artwork in a black and grey
-  gallery. Select a map to see every save for that map by round, player mode
+  gallery. Select a map to see every save for that map by title, round, player mode
   or count, and date and time. The map artwork remains on the left and the
   selected save's details appear on the right. Turn the mouse wheel over the
   maps or save list to scroll; neither list shows a scrollbar.
 - The player panel shows points, weapons or loadout, revives, downs, and
   kills for each player. The manager reads these from checkpoints when the
-  local FFmpeg LZO decoder is available. If a save cannot be decoded, use
-  **Edit player stats** to enter the details. Manual edits are stored in
-  `catalog.json` and never change the checkpoint file. Cooperative player
-  extraction still needs validation with a real cooperative checkpoint.
+  local FFmpeg LZO decoder is available. The host's Steam name is used in the
+  display when an older checkpoint calls that player Unknown Soldier.
+  Cooperative player extraction still needs validation with a real cooperative checkpoint.
 - The manager starts watching when it opens. It makes a checkpoint when the
   Zombies round-end signal fires, using the advancing round counter if that
   signal was missed, and archives a
@@ -77,6 +76,13 @@ when missing or different, backing up any replaced files under
   when new round or F11 checkpoints replace the save you started. A red X
   means those checkpoints are kept as separate saves. Its setting is saved
   between manager sessions.
+- **Auto Save Settings** cycles through End of Rounds, Round Transitions, and
+  Start of Round. The watcher reads the Zombies round-end flag and round counter
+  for these timings. The setting is remembered between manager sessions.
+- **Start New Game** below the selected map artwork starts that map without
+  continuing a saved checkpoint. Automatic saves begin at the chosen round timing.
+- New checkpoints on a map receive titles Save Game 1, Save Game 2, and so on.
+  Renamed titles remain unchanged, including when Overwrite Game Saves is on.
 - Select a checkpoint to see its details. **Favorites** filters the list.
   **Delete** permanently removes the selected
   checkpoint file after a confirmation.
@@ -92,7 +98,8 @@ when missing or different, backing up any replaced files under
   In Solo it presses F11,
   retries during opening if the first key press was ignored, verifies the fresh
   checkpoint, briefly suspends the game to restore the selected checkpoint,
-  then presses F12 to run `loadgame_continue`. The restored round is not
+  then presses F12 to run `loadgame_continue`. It waits for the saved round to
+  resume and selects the host's prior weapon with one wheel-up input. The restored round is not
   archived again; saving resumes on the next round or player F11. You can cancel
   while it is preparing. A game launched before the new F10 binding was added
   needs one restart through the manager to install that binding.
@@ -134,7 +141,7 @@ when missing or different, backing up any replaced files under
 - Press F11 in Black Ops whenever you want an extra saved game. The manager
   archives it automatically; no button press in the window is needed.
 
-Save titles, favorites, game names, player details, and the overwrite choice are stored in
+Save titles, favorites, game names, player details, and the overwrite and timing choices are stored in
 `checkpoint_saves/catalog.json`. The `.bo1checkpoint` files contain the game
 state and are never rewritten when you rename or favorite a save. The list
 shows each save's round, Solo or player count when known, and timestamp.

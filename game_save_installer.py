@@ -27,7 +27,7 @@ PACKAGE_FILES = (
 MOD_FILES = (
     "checkpoint.py", "checkpoint_gui.py", "checkpoint_memory.py",
     "checkpoint_stats.py", "save_library.py", "game_launcher.py",
-    "fov_keeper.py",
+    "fov_keeper.py", "steam_identity.py",
     "game_save_installer.py", "checkpoint.cfg", "checkpoint_borderless.cfg",
     "checkpoint_fullscreen.cfg", "display_mode.py", "CHECKPOINTS.md",
     "mod.ff", "mod.csv", "missingasset.csv", "Open Game Save.cmd",

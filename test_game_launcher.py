@@ -105,6 +105,16 @@ with patch.object(core.time, "sleep") as delay:
     key_game.press_game_key(0x7A, "F11")
 assert sent_flags == [8, 10]
 delay.assert_called_once_with(0.06)
+assert ctypes.sizeof(core.INPUT) == 40
+wheel_events = []
+def capture_wheel(count, event, size):
+    sent = ctypes.cast(event, ctypes.POINTER(core.INPUT)).contents
+    wheel_events.append((sent.type, sent.data.mi.mouseData, sent.data.mi.dwFlags))
+    return 1
+
+key_game.user.SendInput = capture_wheel
+key_game.select_previous_weapon()
+assert wheel_events == [(0, 120, 0x0800)]
 
 
 class FreshGame:
@@ -151,6 +161,16 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
 assert fresh_game.commands[-1] == "F12"
 assert restore_mock.call_args.kwargs == {"coop": True}
+
+with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory", "round": 4}, {})),
+      patch.object(game_launcher, "make_fresh_checkpoint"),
+      patch.object(core, "restore"),
+      patch.object(game_launcher, "wait_for_focus"),
+      patch.object(game_launcher, "wait_for_loaded_round", return_value=True) as loaded,
+      patch.object(fresh_game, "select_previous_weapon", create=True) as weapon):
+    game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
+loaded.assert_called_once_with(fresh_game, 4, None)
+weapon.assert_called_once()
 
 
 class SwitchGame:
@@ -225,5 +245,14 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
 assert new_game is replacement_game
 reconnect.assert_called_once_with(4420, None)
 assert ready.call_args.kwargs == {"during_opening": True}
+
+with (patch.object(core, "game_pid", return_value=4420),
+      patch.object(core, "GameProcess", return_value=switch_game),
+      patch.object(game_launcher, "switch_running_map") as switch,
+      patch.object(game_launcher, "wait_for_map_ready") as ready):
+    fresh_map = game_launcher.start_new_game("zombie_cod5_factory")
+assert fresh_map is switch_game
+switch.assert_called_once_with(switch_game, "zombie_cod5_factory", None, legacy=False)
+assert ready.call_args.kwargs == {"during_opening": False, "allow_stale_checkpoint": True}
 
 print("Launcher readiness and bound save/load keys passed")

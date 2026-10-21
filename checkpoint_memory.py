@@ -59,6 +59,7 @@ SCENES = {5: "kino", 10: "five", 15: "dead_ops", 20: "ascension",
           108: "nacht", 140: "verruckt", 172: "shi_no_numa", 204: "der_riese"}
 START_TICKS = {5: 190, 10: 190, 15: 50, 20: 580, 28: 190, 44: 190,
                76: 195, 108: 195, 140: 200, 172: 198, 204: 195}
+SAVE_TIMINGS = ("End of Rounds", "Round Transitions", "Start of Round")
 MAP_SCENES = {
     "zombie_theater": 5,
     "zombie_pentagon": 10,
@@ -79,8 +80,14 @@ class KEYBDINPUT(ctypes.Structure):
                 ("dwExtraInfo", ctypes.c_size_t)]
 
 
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG),
+                ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+
 class INPUT_UNION(ctypes.Union):
-    _fields_ = [("ki", KEYBDINPUT), ("padding", ctypes.c_byte * 32)]
+    _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT)]
 
 
 class INPUT(ctypes.Structure):
@@ -230,6 +237,17 @@ class GameProcess:
 
     def press_coop_resume(self):
         self.press_game_key(0x77, "F8 co-op resume")
+
+    def select_previous_weapon(self):
+        """Use the game's existing wheel-up weapon binding after Continue."""
+        if not self.foreground():
+            raise RuntimeError("Bring Black Ops to the foreground before selecting the saved weapon")
+        event = INPUT()
+        event.type = 0  # INPUT_MOUSE
+        event.data.mi.mouseData = 120
+        event.data.mi.dwFlags = 0x0800  # MOUSEEVENTF_WHEEL
+        if self.user.SendInput(1, ctypes.byref(event), ctypes.sizeof(INPUT)) != 1:
+            raise OSError("Windows rejected the weapon selection input")
 
     def press_game_key(self, virtual_key: int, description: str):
         if not self.foreground():
@@ -503,9 +521,12 @@ class RoundTracker:
 
 
 class RoundEndTracker:
-    """Detect a completed wave without saving when first joining a live map."""
+    """Detect the selected wave boundary without saving on first attach."""
 
-    def __init__(self):
+    def __init__(self, timing: str = "End of Rounds"):
+        if timing not in SAVE_TIMINGS:
+            raise ValueError(f"Unknown auto save timing: {timing}")
+        self.timing = timing
         self.scene = None
         self.round = None
         self.round_change = None
@@ -517,9 +538,9 @@ class RoundEndTracker:
                round_number: int | None, round_change: bool,
                now: float) -> tuple[int, int, str] | None:
         if (scene is not None and self.scene is not None and scene != self.scene):
-            self.__init__()
+            self.__init__(self.timing)
         if round_number is not None and self.round is not None and round_number < self.round:
-            self.__init__()
+            self.__init__(self.timing)
         if scene is not None:
             self.scene = scene
         if round_number is None or menu != 0 or timer <= START_TICKS.get(scene, 195):
@@ -537,24 +558,27 @@ class RoundEndTracker:
             if round_number > previous_round + 1:
                 self.pending = None  # loadgame_continue, not a played round
             elif self.completed_round != previous_round:
-                self.pending = (round_number, previous_round, now + 0.4,
-                                "round counter")
+                delay = 0.5 if self.timing == "Start of Round" else 0.4
+                self.pending = (round_number, previous_round, now + delay,
+                                "round start" if self.timing == "Start of Round" else "round counter")
             self.round = round_number
 
         if round_change:
             completed_at_edge = (previous_round if previous_round is not None and
                                  round_number == previous_round + 1 else round_number)
-            if (previous_change is False and self.active_since is not None
+            if (self.timing != "Start of Round" and previous_change is False and self.active_since is not None
                     and now - self.active_since >= 5
                     and self.completed_round != completed_at_edge):
-                self.pending = (round_number, completed_at_edge, now + 0.1,
-                                "round end")
+                delay = 0.75 if self.timing == "Round Transitions" else 0.1
+                self.pending = (round_number, completed_at_edge, now + delay,
+                                "round transition" if self.timing == "Round Transitions" else "round end")
             self.active_since = None
         elif previous_change is not False or self.active_since is None:
             self.active_since = now
         self.round_change = round_change
 
-        if self.pending and now >= self.pending[2]:
+        if (self.pending and now >= self.pending[2] and
+                (self.timing != "Start of Round" or not round_change)):
             label, completed, _due, signal = self.pending
             if self.completed_round != completed:
                 return label, completed, signal
@@ -618,6 +642,13 @@ def request_and_save(game: GameProcess, round_number: int | None = None,
     except RuntimeError:
         prior_id = -1
         prior_address = None
+    except OSError as error:
+        if isinstance(error, PermissionError) or error.errno not in (299, 487, 998):
+            raise
+        # The first checkpoint after a map load can have valid buffer pointers
+        # before the committed buffer itself is readable.
+        prior_id = -1
+        prior_address = None
     request_fresh_checkpoint(game, prior_id, prior_address=prior_address)
     saved = snapshot(game, round_number, target=target)
     print(f"Saved round {round_number}: {saved}", flush=True)
@@ -631,19 +662,22 @@ def effective_scene(game: GameProcess, raw_scene: int) -> tuple[int | None, str 
     # The committed engine checkpoint contains the actual map identity.
     try:
         _, _, header = committed(game)
-    except RuntimeError:
+    except (RuntimeError, OSError):
         return None, None
     return MAP_SCENES.get(header["map"]), header["map"]
 
 
 def watch(start_round: int | None = None, stop_event=None, on_event=None, save_lock=None,
-          skip_initial_round: int | None = None, enable_recovery: bool = True):
+          skip_initial_round: int | None = None, enable_recovery: bool = True,
+          save_timing: str = "End of Rounds"):
+    if save_timing not in SAVE_TIMINGS:
+        raise ValueError(f"Unknown auto save timing: {save_timing}")
     print("Watching Black Ops rounds. Load checkpoint.cfg in the game; Ctrl+C stops.", flush=True)
     pid = None
     game = None
     tracker = RoundTracker(start_round or 1)
     tracker.saved_round = skip_initial_round
-    end_tracker = RoundEndTracker()
+    end_tracker = RoundEndTracker(save_timing)
     resume_manual_after = (time.monotonic() + 5 if skip_initial_round is not None else 0)
     waiting_for_focus = None
     last_phase = None
@@ -681,7 +715,7 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                 pid = found
                 tracker = RoundTracker(start_round or 1)
                 tracker.saved_round = skip_initial_round
-                end_tracker = RoundEndTracker()
+                end_tracker = RoundEndTracker(save_timing)
                 waiting_for_focus = None
                 last_phase = None
                 last_marker = None
@@ -728,9 +762,13 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                     try:
                         current_address, _, current_header = committed(game)
                         marker = (current_address, current_header["map"], current_header["save_id"])
-                    except RuntimeError:
+                    except (RuntimeError, OSError):
                         marker = None
-                    if time.monotonic() < resume_manual_after:
+                    if marker is None:
+                        # The save buffers may be unmapped while Continue
+                        # finishes. Do not turn their return into an F11 save.
+                        pass
+                    elif time.monotonic() < resume_manual_after:
                         # F12 can change the committed buffer while the saved
                         # round appears. That transition is not a player F11.
                         last_marker = marker
@@ -859,6 +897,8 @@ def main():
     watcher = sub.add_parser("watch", help="request and persist a checkpoint at each detected round")
     watcher.add_argument("--resume-round", type=int,
                          help="legacy fallback if the live round counter is unavailable")
+    watcher.add_argument("--save-timing", choices=SAVE_TIMINGS,
+                         default=SAVE_TIMINGS[0], help="when to request each automatic checkpoint")
     sub.add_parser("save", help="request and persist one checkpoint now (game must have focus)")
     capture_cmd = sub.add_parser("capture", help="archive the game's already committed devsave without pressing a key")
     capture_cmd.add_argument("round", type=int, nargs="?",
@@ -879,7 +919,7 @@ def main():
         if args.action == "watch":
             if args.resume_round is not None and args.resume_round < 1:
                 raise ValueError("--resume-round must be at least 1")
-            watch(args.resume_round)
+            watch(args.resume_round, save_timing=args.save_timing)
             return
         pid = game_pid()
         if not pid:

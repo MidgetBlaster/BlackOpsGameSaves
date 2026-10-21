@@ -20,6 +20,22 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directo
         original = save.read_bytes()
         catalog = lib.SaveLibrary(archive / "catalog.json")
         assert len(catalog.data["saves"]) == 1
+        assert catalog.data["saves"][save.name]["title"] == "Save Game 1"
+        second = archive / "sample-round-005.bo1checkpoint"
+        with zipfile.ZipFile(second, "w") as file:
+            file.writestr("manifest.json", json.dumps({
+                "format": 1, "map": "zombie_cod5_factory", "round": 5,
+                "saved_at": "2026-10-20T05:02:00-04:00"}))
+        catalog.scan()
+        assert catalog.data["saves"][second.name]["title"] == "Save Game 2"
+        catalog.delete_save(second.name)
+        with zipfile.ZipFile(second, "w") as file:
+            file.writestr("manifest.json", json.dumps({
+                "format": 1, "map": "zombie_cod5_factory", "round": 6,
+                "saved_at": "2026-10-20T05:03:00-04:00"}))
+        catalog.scan()
+        assert catalog.data["saves"][second.name]["title"] == "Save Game 3"
+        catalog.delete_save(second.name)
         profile = catalog.new_profile("My solo game", "Solo")
         catalog.register(save, kind="auto", profile_id=profile)
         catalog.edit_save(save.name, title="High round attempt", profile_id=profile,
