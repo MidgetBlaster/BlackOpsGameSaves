@@ -101,8 +101,9 @@ when missing or different, backing up any replaced files under
 - **Continue** loads the newest checkpoint for the selected map by save time.
 - New checkpoints on a map receive titles Save Game 1, Save Game 2, and so on.
   Renamed titles remain unchanged, including when Overwrite Game Saves is on.
-- Select a checkpoint to see its details. Hold **Shift** to select a range on
-  the current page or **Ctrl** to select individual saves across pages. The
+- Select a checkpoint to see its details. Hold **Shift** and click to select a
+  range across pages, **Ctrl** to select individual saves, or press **Shift+A**
+  to select every save on the selected map in the current view. The
   context menu's Export Save puts selected saves in one portable package;
   Delete removes them after confirmation.
 - Right-click a save for **Start Game**, **Rename**, **Favorite**,

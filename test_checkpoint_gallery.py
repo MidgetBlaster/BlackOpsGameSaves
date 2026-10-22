@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import checkpoint_gui as gui
+import tkinter as tk
 import tkinter.font as tkfont
 
 
@@ -167,7 +168,35 @@ def test_recent_saves():
                 app.events.put(("saved", checkpoint, "auto", "imported", None))
                 app._poll_events()
                 replace.assert_called_once_with(checkpoint, "kino-4")
+            for number in range(5, 9):
+                entries[f"kino-{number}"] = {
+                    "map": "zombie_theater", "round": number,
+                    "saved_at": (base + timedelta(minutes=number)).isoformat(),
+                    "title": f"Save Game {number}", "favorite": False,
+                }
+            app.gallery_page_index = 0
+            app._render_gallery()
+            app._select_gallery_save("kino-8")
+            app._change_gallery_page(2)
+            assert app.gallery_page_index == 2
+            app._select_gallery_save("kino-1", SimpleNamespace(state=0x1))
+            assert app.selected_names() == [f"kino-{number}" for number in range(8, 0, -1)]
+            assert app.gallery_anchor_save == "kino-8"
+            app._select_gallery_save("kino-1", SimpleNamespace(state=0x4))
+            assert "kino-1" not in app.selected_names()
+            assert app.bind("<Shift-KeyPress-A>")
+            app.gallery_canvas.focus_set()
+            app.gallery_canvas.event_generate("<Shift-KeyPress-A>")
+            app.update()
+            assert app.selected_names() == [f"kino-{number}" for number in range(8, 0, -1)]
+            app._select_gallery_save("kino-1")
+            app._change_gallery_page(-2)
+            app._select_gallery_save("kino-8", SimpleNamespace(state=0x1))
+            assert len(app.selected_names()) == 8
             app._select_gallery_map("zombie_cod5_factory")
+            assert app.selected_names() == []
+            app._select_all_gallery_saves()
+            assert app.selected_names() == ["riese"]
             rectangle, title = app.gallery_rows["zombie_cod5_factory"]
             assert canvas.itemcget(rectangle, "fill") == "#f5f4f1"
             assert canvas.itemcget(title, "fill") == "#0d0d0d"
@@ -186,8 +215,17 @@ def test_recent_saves():
             assert canvas.coords("gallery-background") == [max(canvas.winfo_width(), 1000) // 2, -130]
             large_save_row = next(iter(app.gallery_save_rows.values()))[0]
             assert canvas.coords(large_save_row)[2] - canvas.coords(large_save_row)[0] == save_width
+            app.busy = True
+            app.close()
+            try:
+                app.winfo_exists()
+            except tk.TclError:
+                pass
+            else:
+                raise AssertionError("The manager stayed open after Close")
         finally:
-            app.destroy()
+            if not app.closing:
+                app.destroy()
 
 
 def test_speed_fix_remembers_off():
@@ -222,7 +260,7 @@ def test_speed_fix_remembers_off():
                 first.toggle_speed_fix()
                 assert first.library.data["speed_fix_enabled"] is False
             finally:
-                first.destroy()
+                first.close()
             reopened = gui.CheckpointApp()
             try:
                 assert not reopened.speed_fix_enabled

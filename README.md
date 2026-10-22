@@ -61,8 +61,10 @@ clock restarting and resumes round tracking. Overwrite Game Saves updates
 the save selected in the manager; turn it off to keep new files.
 Use **Export selected** or **Export all** to create a `.bo1gamesave` file and
 **Import saves** on another machine to add it to the Imported saves view.
-In a map's save list, hold Shift to select a range or Ctrl to select individual
-saves, then choose **Export selected** or **Delete selected**.
+In a map's save list, hold Shift and click to select a range across pages, or
+Ctrl-click to select individual saves. Press Shift+A to select every save on
+the selected map in the current view. Then choose **Export selected** or
+**Delete selected**.
 
 The tested game executable has SHA-256
 `1141278c4599025c85d0e27d1629a5e8ecb0568559c4d9653e693018c3b25f1e`.
@@ -79,7 +81,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.16
+python package_release.py v1.0.17
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,

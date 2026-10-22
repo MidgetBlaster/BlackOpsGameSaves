@@ -1,4 +1,13 @@
-# Black Ops Game Saves v1.0.16
+# Black Ops Game Saves v1.0.17
+
+- Shift-click selects the full save range across pages on the selected map.
+  Shift+A selects every save on that map in the current view. Ctrl-click and
+  multi-save export and delete continue to work across pages.
+- The manager can close while Black Ops is running or closed, including during
+  a pending startup or save. It stops monitoring and briefly waits for an
+  active checkpoint write to finish.
+
+## v1.0.16
 
 - Restores the fixed-size Zombies lobby background and its original centered,
   raised placement so Mission Select lines up with the artwork while the

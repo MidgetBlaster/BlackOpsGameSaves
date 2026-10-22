@@ -267,6 +267,8 @@ class CheckpointApp(tk.Tk):
         self.gallery_canvas.bind("<MouseWheel>", self._gallery_mouse_wheel)
         self.gallery_canvas.bind("<Button-4>", lambda event: self._gallery_mouse_wheel(event, -1))
         self.gallery_canvas.bind("<Button-5>", lambda event: self._gallery_mouse_wheel(event, 1))
+        self.bind("<Shift-KeyPress-a>", self._select_all_gallery_saves)
+        self.bind("<Shift-KeyPress-A>", self._select_all_gallery_saves)
         self.heading.pack_forget()  # Mission Select is drawn on the lobby artwork.
 
         self.saves_page = ttk.Frame(outer)
@@ -480,7 +482,7 @@ class CheckpointApp(tk.Tk):
                 self.events.put(("install_error", str(error)))
             else:
                 self.events.put(("installed", result))
-        threading.Thread(target=work, daemon=False).start()
+        threading.Thread(target=work, daemon=True).start()
 
     def _update_fov_button(self):
         self.fov_button.configure(text="FoV On" if self.fov_enabled else "FoV Off",
@@ -660,7 +662,7 @@ class CheckpointApp(tk.Tk):
             finally:
                 if game is not None:
                     game.close()
-        threading.Thread(target=work, daemon=False).start()
+        threading.Thread(target=work, daemon=True).start()
 
     def _ensure_display_mode(self):
         if self.closing:
@@ -1001,11 +1003,12 @@ class CheckpointApp(tk.Tk):
         if name not in self.gallery_visible_saves:
             return
         state = getattr(event, "state", 0)
-        if state & 0x1 and self.gallery_anchor_save in self.gallery_visible_saves:
-            first = self.gallery_visible_saves.index(self.gallery_anchor_save)
-            last = self.gallery_visible_saves.index(name)
+        names = self._gallery_save_names()
+        if state & 0x1 and self.gallery_anchor_save in names:
+            first = names.index(self.gallery_anchor_save)
+            last = names.index(name)
             self.gallery_selected_saves.update(
-                self.gallery_visible_saves[min(first, last):max(first, last) + 1])
+                names[min(first, last):max(first, last) + 1])
         elif state & 0x4:
             if name in self.gallery_selected_saves:
                 self.gallery_selected_saves.remove(name)
@@ -1016,6 +1019,22 @@ class CheckpointApp(tk.Tk):
             self.gallery_selected_saves = {name}
             self.gallery_anchor_save = name
         self._render_gallery()
+
+    def _gallery_save_names(self) -> list[str]:
+        if not self.gallery_selected_map:
+            return []
+        saves = self.library.data["saves"]
+        return [name for name, _entry in recent_map_saves(
+            saves, self.gallery_selected_map, self.category.get(), limit=len(saves))]
+
+    def _select_all_gallery_saves(self, _event=None):
+        if self.saves_page.winfo_manager() or not self.gallery_selected_map:
+            return None
+        names = self._gallery_save_names()
+        self.gallery_selected_saves = set(names)
+        self.gallery_anchor_save = names[0] if names else None
+        self._render_gallery()
+        return "break"
 
     def _start_gallery_save(self, name: str):
         self.gallery_selected_saves = {name}
@@ -1154,8 +1173,8 @@ class CheckpointApp(tk.Tk):
 
     def selected_names(self) -> list[str]:
         if not self.saves_page.winfo_manager():
-            return [name for name in self.gallery_selected_saves
-                    if name in self.library.data["saves"]]
+            return [name for name in self._gallery_save_names()
+                    if name in self.gallery_selected_saves]
         selected = set(self.tree.selection())
         return [name for name in self.tree.get_children() if name in selected]
 
@@ -1310,7 +1329,7 @@ class CheckpointApp(tk.Tk):
             mode = "Solo" if solo else "Co-op"
         return mode
 
-    def _resume_coop_if_needed(self):
+    def _resume_coop_if_needed(self, *, timeout: float = 30):
         if not self.coop_paused:
             return
         pid = core.game_pid()
@@ -1321,7 +1340,7 @@ class CheckpointApp(tk.Tk):
             return
         game = core.GameProcess(pid)
         try:
-            game_launcher.wait_for_focus(game)
+            game_launcher.wait_for_focus(game, timeout=timeout)
             game.press_coop_resume()
             time.sleep(0.4)
         finally:
@@ -1477,7 +1496,7 @@ class CheckpointApp(tk.Tk):
                 function()
             except Exception as error:
                 self.events.put(("error", str(error)))
-        threading.Thread(target=run, daemon=False).start()
+        threading.Thread(target=run, daemon=True).start()
 
     def _start_watch(self):
         if (self.closing or self.busy or self.pending_coop or self.coop_paused
@@ -1669,22 +1688,26 @@ class CheckpointApp(tk.Tk):
         self.after(100, self._poll_events)
 
     def close(self):
-        if self.busy:
-            messagebox.showinfo("Checkpoint in progress", "Wait for the current save or load to finish before closing.", parent=self)
+        if self.closing:
             return
-        if self.coop_paused:
-            try:
-                self._resume_coop_if_needed()
-            except Exception as error:
-                messagebox.showerror("Resume Co-op first", str(error) + "\n\nYou can also press F8 in Black Ops.", parent=self)
-                return
         self.closing = True
+        if self.start_cancel:
+            self.start_cancel.set()
         self.fov_stop.set()
         if self.watch_stop:
             self.watch_stop.set()
-        if self.watch_thread and self.watch_thread.is_alive():
+        if self.coop_paused:
+            try:
+                self._resume_coop_if_needed(timeout=1)
+            except Exception:
+                pass  # Closing must still work if the game is gone or unfocused.
+        self.close_deadline = time.monotonic() + 3
+        self._finish_close()
+
+    def _finish_close(self):
+        if self.save_lock.locked() and time.monotonic() < self.close_deadline:
             self.status.set("Finishing save monitoring before closing...")
-            self.after(150, self.close)
+            self.after(100, self._finish_close)
             return
         target = self.launch_after_close
         self.destroy()
