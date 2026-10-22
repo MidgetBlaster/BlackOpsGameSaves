@@ -1,12 +1,14 @@
 Black Ops Game Saves — Windows installer
 
 1. Run InstallBlackOpsGameSaves.exe and select the folder containing BlackOps.exe.
-   The Desktop shortcut option is selected by default.
-2. Open Black Ops Game Saves from the Desktop shortcut or from
+2. Leave the Desktop shortcut option selected if you want a shortcut, then
+   click Install Game Save.
+3. When it finishes, click Run now, use the shortcut, or open
    mods\Game Save\BlackOpsGameSaves.exe.
 
 This one installer carries the Game Save mod, loader, map thumbnails, save
-manager, and icon. It does not contain personal checkpoints. In the save manager,
+manager, and icon. You can send only this installer EXE to another user. It does
+not contain personal checkpoints. In the save manager,
 use Export selected or Export all to make a .bo1gamesave file, copy that
 file to another computer, and choose Import saves there.
 Hold Shift or Ctrl in a map's save list to select several saves before

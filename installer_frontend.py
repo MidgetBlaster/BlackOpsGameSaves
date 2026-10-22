@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+from io import BytesIO
 import os
 from pathlib import Path
 import subprocess
@@ -39,6 +40,18 @@ def verify_bundle() -> tuple[Path, Path, Path]:
         damaged = archive.testzip()
         if damaged:
             raise ValueError(f"The installer package contains a damaged file: {damaged}")
+        for name in game_save_installer.MAP_THUMBNAILS:
+            artwork = archive.read(f"ui textures/png/{name}")
+            if not artwork.startswith(b"\x89PNG\r\n\x1a\n"):
+                raise ValueError(f"The installer contains an invalid map thumbnail: {name}")
+        with zipfile.ZipFile(BytesIO(archive.read("installer/game_mod.zip"))) as loader:
+            missing_loader = sorted(set(game_save_installer.PACKAGE_FILES) - set(loader.namelist()))
+            if missing_loader:
+                raise FileNotFoundError("The bundled game_mod loader is missing: " +
+                                        ", ".join(missing_loader))
+            damaged_loader = loader.testzip()
+            if damaged_loader:
+                raise ValueError(f"The bundled game_mod loader is damaged: {damaged_loader}")
     return payload, manager, icon
 
 
@@ -57,10 +70,12 @@ class Installer(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Install Black Ops Game Saves")
-        self.geometry("625x285")
-        self.resizable(False, False)
+        self.geometry("780x400")
+        self.minsize(720, 380)
+        self.resizable(True, True)
         self.configure(bg="#141414")
         self.installing = False
+        self.installed_app: Path | None = None
         self.protocol("WM_DELETE_WINDOW", self.close)
         try:
             self.iconbitmap(str(resource("BlackOpsGameSaves.ico")))
@@ -68,7 +83,7 @@ class Installer(tk.Tk):
             pass
         tk.Label(self, text="BLACK OPS GAME SAVES", bg="#141414", fg="#eeeeee",
                  font=("Segoe UI", 17, "bold")).pack(anchor="w", padx=24, pady=(24, 4))
-        tk.Label(self, text="Installs the Zombies save mod, map images, loader, and save manager.",
+        tk.Label(self, text="One installer for the Game Save mod, game_mod loader, save manager, and map images.",
                  bg="#141414", fg="#aaaaaa",
                  font=("Segoe UI", 10)).pack(anchor="w", padx=24)
         tk.Label(self, text="Black Ops game folder", bg="#141414", fg="#eeeeee",
@@ -82,6 +97,9 @@ class Installer(tk.Tk):
                      side="left", fill="x", expand=True, ipady=7)
         tk.Button(row, text="Browse…", command=self.browse, bg="#333333", fg="#eeeeee",
                   relief="flat", padx=12, pady=7).pack(side="right", padx=(8, 0))
+        tk.Label(self, text="Install locations:  mods\\Game Save  •  bin  •  main  •  zone\\Common",
+                 bg="#141414", fg="#aaaaaa", font=("Segoe UI", 9)).pack(
+                     anchor="w", padx=24, pady=(8, 0))
         self.status = tk.StringVar(value="Ready to install." if found else
                                    "Choose the folder containing BlackOps.exe.")
         tk.Label(self, textvariable=self.status, bg="#141414", fg="#aaaaaa",
@@ -93,15 +111,19 @@ class Installer(tk.Tk):
                        activebackground="#141414", activeforeground="#eeeeee",
                        font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(8, 0))
         row = tk.Frame(self, bg="#141414")
-        row.pack(side="bottom", fill="x", padx=24, pady=20)
-        self.install_button = tk.Button(row, text="Install", command=self.begin,
+        row.pack(fill="x", padx=24, pady=(28, 20))
+        self.install_button = tk.Button(row, text="Install Game Save", command=self.begin,
                                         bg="#dddddd", fg="#111111", relief="flat",
-                                        padx=20, pady=8, font=("Segoe UI", 10, "bold"))
-        self.install_button.pack(side="right")
+                                        padx=22, pady=10, font=("Segoe UI", 11, "bold"))
+        self.install_button.pack(side="left")
+        self.run_button = tk.Button(row, text="Run now", command=self.run_installed,
+                                    bg="#333333", fg="#eeeeee", relief="flat",
+                                    padx=18, pady=10, state="disabled")
+        self.run_button.pack(side="left", padx=(12, 0))
         self.close_button = tk.Button(row, text="Close", command=self.close,
                                       bg="#333333", fg="#eeeeee", relief="flat",
                                       padx=18, pady=8)
-        self.close_button.pack(side="right", padx=(0, 8))
+        self.close_button.pack(side="right")
 
     def close(self):
         if self.installing:
@@ -122,7 +144,9 @@ class Installer(tk.Tk):
             messagebox.showerror("Choose Black Ops", "Select the folder containing BlackOps.exe.", parent=self)
             return
         self.installing = True
+        self.installed_app = None
         self.install_button.configure(state="disabled")
+        self.run_button.configure(state="disabled")
         self.close_button.configure(state="disabled")
         self.status.set("Installing…")
         create_shortcut = self.shortcut.get()
@@ -145,17 +169,29 @@ class Installer(tk.Tk):
                         message += " Desktop shortcut created."
                     except OSError as error:
                         message += f" Desktop shortcut could not be created: {error}"
-                self.after(0, lambda: self.finish(message))
+                self.after(0, lambda: self.finish(message, destination / "BlackOpsGameSaves.exe"))
             except Exception as error:
                 self.after(0, lambda error=error: self.failed(str(error)))
         threading.Thread(target=work, daemon=False).start()
 
-    def finish(self, message: str):
+    def finish(self, message: str, installed_app: Path):
         self.installing = False
+        self.installed_app = installed_app
         self.install_button.configure(state="normal")
+        self.run_button.configure(state="normal")
         self.close_button.configure(state="normal")
-        self.status.set(message)
-        messagebox.showinfo("Installation complete", message, parent=self)
+        self.status.set("Installed successfully. " + message + " Click Run now to open the save manager.")
+
+    def run_installed(self):
+        if self.installed_app is None or not self.installed_app.is_file():
+            messagebox.showerror("Run now", "Install the save manager first.", parent=self)
+            return
+        try:
+            subprocess.Popen([str(self.installed_app)], cwd=self.installed_app.parent)
+        except OSError as error:
+            messagebox.showerror("Run now", str(error), parent=self)
+            return
+        self.destroy()
 
     def failed(self, message: str):
         self.installing = False
@@ -173,8 +209,10 @@ def main():
         return
     app = Installer()
     if "--smoke" in sys.argv:
-        app.withdraw()
         app.update()
+        if (app.install_button.winfo_rooty() + app.install_button.winfo_height() >
+                app.winfo_rooty() + app.winfo_height()):
+            raise RuntimeError("The Install button is below the installer window")
         app.destroy()
     else:
         app.mainloop()

@@ -125,6 +125,34 @@ def test_complete_bundle_installs_artwork_and_manager():
             assert not repeat["runtime_files"]
 
 
+def test_installer_run_now_after_completion():
+    import installer_frontend
+
+    with TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+        manager = Path(temporary) / "Game Save" / "BlackOpsGameSaves.exe"
+        manager.parent.mkdir()
+        manager.write_bytes(b"installed manager")
+        with patch.object(game_save_installer, "find_game", return_value=None):
+            window = installer_frontend.Installer()
+        destroyed = False
+        try:
+            window.update()
+            assert window.install_button.cget("text") == "Install Game Save"
+            assert window.shortcut.get() is True
+            assert window.run_button.cget("state") == "disabled"
+            assert (window.install_button.winfo_rooty() + window.install_button.winfo_height()
+                    <= window.winfo_rooty() + window.winfo_height())
+            window.finish("Files installed.", manager)
+            assert window.run_button.cget("state") == "normal"
+            with patch.object(installer_frontend.subprocess, "Popen") as launch:
+                window.run_installed()
+                destroyed = True
+                launch.assert_called_once_with([str(manager)], cwd=manager.parent)
+        finally:
+            if not destroyed:
+                window.destroy()
+
+
 def test_unsupported_build_stops_before_installing():
     with TemporaryDirectory(dir=Path(__file__).parent) as temporary:
         game = Path(temporary) / "Call of Duty Black Ops"
@@ -145,5 +173,6 @@ if __name__ == "__main__":
     test_install()
     test_steam_library_discovery()
     test_complete_bundle_installs_artwork_and_manager()
+    test_installer_run_now_after_completion()
     test_unsupported_build_stops_before_installing()
     print("Game Save installation and reinstallation passed")

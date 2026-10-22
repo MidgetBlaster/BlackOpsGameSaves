@@ -1,4 +1,11 @@
-# Black Ops Game Saves v1.0.8
+# Black Ops Game Saves v1.0.9
+
+- Makes the install action visible and labeled **Install Game Save** in a larger,
+  resizable window.
+- Adds **Run now** after the mod and manager finish installing.
+- Verifies embedded PNG thumbnails and the game_mod loader before installation.
+
+## v1.0.8
 
 - Combines the Game Save mod, loader, map thumbnails, and save manager into one
   installer with an optional Desktop shortcut.

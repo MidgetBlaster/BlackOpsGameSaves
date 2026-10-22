@@ -11,14 +11,16 @@ stats, favorites, save export/import, FoV controls, and a co-op pause toggle.
 
 Download the Windows package from Releases, then:
 
-1. Run `InstallBlackOpsGameSaves.exe` and select the folder containing
-   `BlackOps.exe`. The Desktop shortcut option is selected by default.
-2. Open Black Ops Game Saves from that shortcut or from
-   `mods\Game Save\BlackOpsGameSaves.exe`.
+1. Run `InstallBlackOpsGameSaves.exe`. Keep the detected game folder or Browse
+   to the folder containing `BlackOps.exe`.
+2. Choose whether to create a Desktop shortcut, then click **Install Game Save**.
+3. When installation finishes, click **Run now**, use the Desktop shortcut, or
+   open `mods\Game Save\BlackOpsGameSaves.exe`.
 
 The installer suggests the detected Black Ops folder and checks the game's
 executable before copying anything. It installs the Game Save mod, map
-thumbnails, `game_mod` loader, manager, and icon together. Personal checkpoints
+thumbnails, `game_mod` loader, manager, and icon together. Only the installer
+EXE is needed on another machine; all required files are embedded. Personal checkpoints
 are never included in the installer, and existing checkpoints are retained.
 
 The manager needs Administrator access to read and write the game's memory.
@@ -43,7 +45,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.8
+python package_release.py v1.0.9
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,
@@ -68,7 +70,7 @@ Push the prepared branch and release tag with:
 
 ```powershell
 git push -u origin main
-git push origin v1.0.8
+git push origin v1.0.9
 ```
 
 The tag push starts the Windows release workflow. The local release package is
