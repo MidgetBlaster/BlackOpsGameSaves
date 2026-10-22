@@ -11,8 +11,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent
 RELEASE = ROOT / "release"
-PROGRAMS = ("BlackOpsGameSaves.exe", "InstallGameSaveMod.exe",
-            "InstallBlackOpsGameSaves.exe")
+PROGRAMS = ("BlackOpsGameSaves.exe", "InstallBlackOpsGameSaves.exe")
 
 
 def tracked_sources() -> list[Path]:

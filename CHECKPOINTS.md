@@ -24,19 +24,18 @@ double-click `Open Game Save.cmd`. For a source checkout, run
 `python .\checkpoint_gui.py` in this folder. Windows will ask for Administrator access so the window can read
 and write Black Ops memory. Close and reopen the manager after an update.
 
-The `release` folder has three separate Windows programs:
+The `release` package has one installer and one standalone manager:
 
-- `InstallGameSaveMod.exe` installs only the Game Save mod and its loader files.
-- `InstallBlackOpsGameSaves.exe` installs only the save manager app into
-  `mods/Game Save`. Run the mod installer first on a new computer.
+- `InstallBlackOpsGameSaves.exe` installs the Game Save mod, map artwork,
+  loader files, and save manager together into `mods/Game Save`.
 - `BlackOpsGameSaves.exe` is the save manager itself. Keep it in
   `mods/Game Save` alongside the installed mod files.
 
-Both installers propose the detected Black Ops directory and have a Browse
-button. The save manager installer offers a Desktop shortcut checkbox, selected
-by default. Their windows and executables use `BlackOpsGameSaves.ico`. Run
-`python build_release.py` to rebuild all three executables with PyInstaller.
-The mod installer deliberately excludes personal checkpoints and catalogs.
+The installer proposes the detected Black Ops directory and has a Browse
+button. Its Desktop shortcut checkbox is selected by default. The window and
+executables use `BlackOpsGameSaves.ico`. Run `python build_release.py` to
+rebuild both executables with PyInstaller. The installer excludes personal
+checkpoints and catalogs, and retains existing installed saves.
 Use **Export selected** or **Export all** in the manager to choose a folder
 with the Windows folder picker. The resulting `.bo1gamesave` file contains
 the checkpoint data, title, favorite mark, mode, and displayed player stats.

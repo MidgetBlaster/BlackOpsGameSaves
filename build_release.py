@@ -1,7 +1,8 @@
-"""Build the save manager and its two separate Windows installers."""
+"""Build the save manager and one all-in-one Windows installer."""
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 import subprocess
 import sys
@@ -44,14 +45,21 @@ def payload_zip() -> Path:
     return package
 
 
-if __name__ == "__main__":
+def main():
+    global RELEASE
+    parser = argparse.ArgumentParser(description="Build the manager and combined installer")
+    parser.add_argument("--output", type=Path, default=RELEASE,
+                        help="Folder for built executables (default: release)")
+    RELEASE = parser.parse_args().output.resolve()
     RELEASE.mkdir(exist_ok=True)
     build("BlackOpsGameSaves", "checkpoint_gui.py", [(ICON, ".")])
     payload = payload_zip()
-    build("InstallGameSaveMod", "install_game_save_mod.py",
-          [(payload, "."), (ICON, ".")])
     build("InstallBlackOpsGameSaves", "install_blackops_game_saves.py",
-          [(RELEASE / "BlackOpsGameSaves.exe", "."), (ICON, ".")])
-    for name in ("BlackOpsGameSaves", "InstallGameSaveMod", "InstallBlackOpsGameSaves"):
+          [(payload, "."), (RELEASE / "BlackOpsGameSaves.exe", "."), (ICON, ".")])
+    for name in ("BlackOpsGameSaves", "InstallBlackOpsGameSaves"):
         executable = RELEASE / f"{name}.exe"
         print(f"{executable}: {executable.stat().st_size:,} bytes")
+
+
+if __name__ == "__main__":
+    main()

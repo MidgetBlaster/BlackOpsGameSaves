@@ -1,4 +1,11 @@
-# Black Ops Game Saves v1.0.7
+# Black Ops Game Saves v1.0.8
+
+- Combines the Game Save mod, loader, map thumbnails, and save manager into one
+  installer with an optional Desktop shortcut.
+- Checks all required map images in the installer bundle and after installation.
+- Keeps existing checkpoints and settings when reinstalling.
+
+## v1.0.7
 
 - Allows BlackOps.exe files with identical mapped game code and data even when
   resources or packaging change the overall file hash.

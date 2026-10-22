@@ -11,7 +11,7 @@ from zipfile import ZipFile
 import checkpoint_memory as core
 import game_save_installer
 from game_save_installer import (MOD_FILES, MOD_FOLDERS, PACKAGE_FILES,
-                                 find_game, install)
+                                 MAP_THUMBNAILS, find_game, install, install_all)
 
 
 def test_install():
@@ -26,6 +26,11 @@ def test_install():
         for folder in MOD_FOLDERS:
             (source / folder).mkdir()
             (source / folder / "example.txt").write_text(folder, encoding="utf-8")
+        thumbnails = source / "ui textures" / "png"
+        thumbnails.mkdir()
+        for name in MAP_THUMBNAILS:
+            (thumbnails / name).write_bytes(
+                (Path(__file__).parent / "ui textures" / "png" / name).read_bytes())
         (source / "devcommands.iwd").write_bytes(b"mod iwd")
         saves = source / "checkpoint_saves"
         saves.mkdir()
@@ -48,6 +53,7 @@ def test_install():
             assert (target / "checkpoint_saves" / "old.bo1checkpoint").read_bytes() == b"old checkpoint"
             assert (game / "bin" / "game_mod.dll").read_bytes() == b"bin/game_mod.dll"
             assert len(result["runtime_files"]) == len(PACKAGE_FILES)
+            assert result["thumbnails"] == len(MAP_THUMBNAILS)
             # Reinstall must keep saves made after the first installation.
             (target / "checkpoint_saves" / "new.bo1checkpoint").write_bytes(b"new checkpoint")
             installed_catalog = json.loads((target / "checkpoint_saves" / "catalog.json").read_text())
@@ -77,6 +83,48 @@ def test_steam_library_discovery():
                 assert find_game(root / "unrelated" / "mods" / "source") == game.resolve()
 
 
+def test_complete_bundle_installs_artwork_and_manager():
+    import build_release
+    import installer_frontend
+
+    payload = build_release.payload_zip()
+    with TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+        root = Path(temporary)
+        game = root / "Call of Duty Black Ops"
+        game.mkdir()
+        executable = game / "BlackOps.exe"
+        executable.write_bytes(b"synthetic supported executable")
+        source = root / "bundle"
+        source.mkdir()
+        with ZipFile(payload) as archive:
+            archive.extractall(source)
+        manager = root / "BlackOpsGameSaves.exe"
+        manager.write_bytes(b"packaged manager")
+        icon = root / "BlackOpsGameSaves.ico"
+        icon.write_bytes((Path(__file__).parent / "BlackOpsGameSaves.ico").read_bytes())
+        with patch.object(installer_frontend, "resource", lambda name: root / name):
+            (root / "game_save_mod_payload.zip").write_bytes(payload.read_bytes())
+            assert installer_frontend.verify_bundle() == (root / "game_save_mod_payload.zip",
+                                                          manager, icon)
+        digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+        with patch.object(core, "SUPPORTED_SHA256", digest):
+            result = install_all(source, game, manager, icon)
+            target = result["target"]
+            assert result["thumbnails"] == len(MAP_THUMBNAILS)
+            assert (target / "BlackOpsGameSaves.exe").read_bytes() == b"packaged manager"
+            assert (target / "BlackOpsGameSaves.ico").read_bytes() == icon.read_bytes()
+            assert (target / "mod.ff").read_bytes() == (source / "mod.ff").read_bytes()
+            assert (target / "Game Save.iwd").is_file()
+            assert (game / "bin" / "game_mod.dll").is_file()
+            for name in MAP_THUMBNAILS:
+                expected = (source / "ui textures" / "png" / name).read_bytes()
+                assert expected.startswith(b"\x89PNG\r\n\x1a\n")
+                assert (target / "ui textures" / "png" / name).read_bytes() == expected
+            repeat = install_all(source, game, manager, icon)
+            assert repeat["app_files"] == 0
+            assert not repeat["runtime_files"]
+
+
 def test_unsupported_build_stops_before_installing():
     with TemporaryDirectory(dir=Path(__file__).parent) as temporary:
         game = Path(temporary) / "Call of Duty Black Ops"
@@ -96,5 +144,6 @@ def test_unsupported_build_stops_before_installing():
 if __name__ == "__main__":
     test_install()
     test_steam_library_discovery()
+    test_complete_bundle_installs_artwork_and_manager()
     test_unsupported_build_stops_before_installing()
     print("Game Save installation and reinstallation passed")

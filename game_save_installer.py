@@ -33,6 +33,13 @@ MOD_FILES = (
     "BlackOpsGameSaves.ico",
 )
 MOD_FOLDERS = ("maps", "clientscripts", "scriptdata", "ui textures", "installer")
+MAP_THUMBNAILS = (
+    "loadscreen_zombie_asylum_mini.png", "loadscreen_zombie_factory_mini.png",
+    "loadscreen_zombie_prototype_mini.png", "loadscreen_zombie_sumpf_mini.png",
+    "zombietron.png", "zombie_coast.png", "zombie_cosmo.png",
+    "zombie_moon.png", "zombie_pentagon.png", "zombie_temple.png",
+    "zombie_theater.png",
+)
 
 
 def _registry_paths() -> list[Path]:
@@ -164,6 +171,7 @@ def install(source: Path, game: Path, package: Path | None = None) -> dict:
         raise FileNotFoundError(f"The bundled game_mod.zip is missing: {package}")
     required = [source / name for name in MOD_FILES]
     required += [source / name for name in MOD_FOLDERS]
+    required += [source / "ui textures" / "png" / name for name in MAP_THUMBNAILS]
     iwd = source / "Game Save.iwd"
     if not iwd.is_file():
         iwd = source / "devcommands.iwd"
@@ -188,6 +196,10 @@ def install(source: Path, game: Path, package: Path | None = None) -> dict:
             if path.is_file():
                 updated_mod += _copy_if_changed(path, target / folder / path.relative_to(source / folder))
     updated_mod += _copy_if_changed(iwd, target / "Game Save.iwd")
+    for name in MAP_THUMBNAILS:
+        destination = target / "ui textures" / "png" / name
+        if not destination.is_file():
+            raise RuntimeError(f"Map thumbnail was not installed: {destination}")
     saves = source / "checkpoint_saves"
     target_saves = target / "checkpoint_saves"
     copied_saves = 0
@@ -217,4 +229,20 @@ def install(source: Path, game: Path, package: Path | None = None) -> dict:
         installed_runtime.append(name)
     return {"target": target, "mod_files": updated_mod,
             "saves": copied_saves, "runtime_files": installed_runtime,
-            "backups": backed_up}
+            "backups": backed_up, "thumbnails": len(MAP_THUMBNAILS)}
+
+
+def install_all(source: Path, game: Path, manager: Path, icon: Path,
+                package: Path | None = None) -> dict:
+    """Install the mod, loader, artwork, and desktop manager together."""
+    manager, icon = Path(manager), Path(icon)
+    for asset in (manager, icon):
+        if not asset.is_file():
+            raise FileNotFoundError(f"The installer is missing a required app file: {asset}")
+    result = install(source, game, package)
+    target = result["target"]
+    result["app_files"] = sum(
+        _copy_if_changed(asset, target / name)
+        for asset, name in ((manager, "BlackOpsGameSaves.exe"),
+                            (icon, "BlackOpsGameSaves.ico")))
+    return result

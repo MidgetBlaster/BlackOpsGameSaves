@@ -54,7 +54,6 @@ jobs:
           gh release create $version `
             "release/BlackOpsGameSaves-$version-windows.zip" `
             "release/BlackOpsGameSaves.exe" `
-            "release/InstallGameSaveMod.exe" `
             "release/InstallBlackOpsGameSaves.exe" `
             "release/SHA256SUMS.txt" `
             --repo $env:GITHUB_REPOSITORY `

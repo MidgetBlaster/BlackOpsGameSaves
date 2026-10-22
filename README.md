@@ -11,16 +11,15 @@ stats, favorites, save export/import, FoV controls, and a co-op pause toggle.
 
 Download the Windows package from Releases, then:
 
-1. Run `InstallGameSaveMod.exe`. Select the folder containing `BlackOps.exe`.
-2. Run `InstallBlackOpsGameSaves.exe` and select the same folder. Its Desktop
-   shortcut option is selected by default.
-3. Open Black Ops Game Saves from that shortcut or from
+1. Run `InstallBlackOpsGameSaves.exe` and select the folder containing
+   `BlackOps.exe`. The Desktop shortcut option is selected by default.
+2. Open Black Ops Game Saves from that shortcut or from
    `mods\Game Save\BlackOpsGameSaves.exe`.
 
-Both installers suggest the detected Black Ops folder. The mod installer
-checks the game's executable before copying anything. It carries the required
-`game_mod` loader; the app installer contains only the manager and its icon.
-Personal checkpoints are never included in the installers.
+The installer suggests the detected Black Ops folder and checks the game's
+executable before copying anything. It installs the Game Save mod, map
+thumbnails, `game_mod` loader, manager, and icon together. Personal checkpoints
+are never included in the installer, and existing checkpoints are retained.
 
 The manager needs Administrator access to read and write the game's memory.
 It watches rounds while open. Press F11 in the game for an extra manual save.
@@ -44,12 +43,12 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.7
+python package_release.py v1.0.8
 ```
 
-The build script produces `BlackOpsGameSaves.exe`, `InstallGameSaveMod.exe`,
-and `InstallBlackOpsGameSaves.exe` in `release/`. The package script creates a
-ZIP with those programs, checksums, and the tracked source. It packages only the required
+The build script produces `BlackOpsGameSaves.exe` and one installer,
+`InstallBlackOpsGameSaves.exe`, in `release/`. The package script creates a
+ZIP with both programs, checksums, and the tracked source. It packages only the required
 mod files from this repository. Build outputs, personal checkpoints, the
 decompiled engine reference, and local game files are excluded from Git.
 
@@ -69,7 +68,7 @@ Push the prepared branch and release tag with:
 
 ```powershell
 git push -u origin main
-git push origin v1.0.7
+git push origin v1.0.8
 ```
 
 The tag push starts the Windows release workflow. The local release package is
