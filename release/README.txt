@@ -12,6 +12,7 @@ file to another computer, and choose Import saves there.
 Hold Shift or Ctrl in a map's save list to select several saves before
 using Export selected or Delete selected.
 
-The game executable must match the supported Black Ops build. The mod
-installer checks this before copying its files. Existing checkpoints
-are retained when installing again.
+The game executable must match the tested Black Ops code and memory layout.
+The mod installer checks this before copying files and displays the selected
+file's path and SHA-256 if it cannot verify compatibility. Existing
+checkpoints are retained when installing again.

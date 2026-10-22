@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -159,9 +158,7 @@ def install(source: Path, game: Path, package: Path | None = None) -> dict:
     executable = game / "BlackOps.exe"
     if not executable.is_file():
         raise FileNotFoundError(f"BlackOps.exe was not found in {game}")
-    digest = hashlib.sha256(executable.read_bytes()).hexdigest()
-    if digest != core.SUPPORTED_SHA256:
-        raise RuntimeError("This Black Ops executable is not the supported build for memory saves.")
+    core.verify_game_executable(executable)
     package = package or source / "installer" / "game_mod.zip"
     if not package.is_file():
         raise FileNotFoundError(f"The bundled game_mod.zip is missing: {package}")

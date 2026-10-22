@@ -1,7 +1,7 @@
 """Persist BO1 Zombies' committed in-memory save across game launches.
 
 Addresses and layout: MisaDev4/bo1-zombies-decompiled, g_sp_savegame.{h,cpp}.
-Supported executable: the BlackOps.exe SHA-256 listed below only.
+Supported executable: the known BlackOps.exe or an identical code/data layout.
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ ARCHIVE = ROOT / "checkpoint_saves"
 RECOVERY_FILE = ARCHIVE / "recovery" / "latest.bo1checkpoint"
 RECOVERY_INTERVAL = 60
 SUPPORTED_SHA256 = "1141278c4599025c85d0e27d1629a5e8ecb0568559c4d9653e693018c3b25f1e"
+SUPPORTED_LAYOUT_SHA256 = "cb385008f998fe9b5b7173047bfbfc0954fa78e7ca89a33f365a8bf9b8a813b1"
+LAYOUT_SECTIONS = (b".text", b".rdata", b".data", b".tls", b".rodata")
 BASE = 0x400000
 COMMITTED_PTR = 0x01D04BA0
 WRITE_PTR = 0x01D04BA4
@@ -78,6 +80,69 @@ MAP_SCENES = {
     "zombie_cod5_sumpf": 172,
     "zombie_cod5_factory": 204,
 }
+
+
+def executable_layout_fingerprint(data: bytes) -> str | None:
+    """Identify the mapped code/data while ignoring resources and file overlays."""
+    if len(data) < 0x40 or data[:2] != b"MZ":
+        return None
+    try:
+        pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+        if pe_offset > len(data) - 24 or data[pe_offset:pe_offset + 4] != b"PE\0\0":
+            return None
+        machine, section_count = struct.unpack_from("<HH", data, pe_offset + 4)
+        optional_size = struct.unpack_from("<H", data, pe_offset + 20)[0]
+        optional_offset = pe_offset + 24
+        if (machine != 0x14C or optional_size < 36 or
+                optional_offset + optional_size > len(data) or
+                struct.unpack_from("<H", data, optional_offset)[0] != 0x10B):
+            return None
+        entry_point = struct.unpack_from("<I", data, optional_offset + 16)[0]
+        image_base, alignment = struct.unpack_from("<II", data, optional_offset + 28)
+        table = optional_offset + optional_size
+        if section_count > 96 or table + section_count * 40 > len(data):
+            return None
+        sections = {}
+        for index in range(section_count):
+            offset = table + index * 40
+            name = data[offset:offset + 8].rstrip(b"\0")
+            if name not in LAYOUT_SECTIONS:
+                continue
+            if name in sections:
+                return None
+            virtual_size, address, raw_size, raw_offset = struct.unpack_from("<IIII", data, offset + 8)
+            characteristics = struct.unpack_from("<I", data, offset + 36)[0]
+            if raw_size == 0 or raw_offset > len(data) or raw_size > len(data) - raw_offset:
+                return None
+            sections[name] = (virtual_size, address, raw_size, characteristics,
+                              data[raw_offset:raw_offset + raw_size])
+        if set(sections) != set(LAYOUT_SECTIONS):
+            return None
+        digest = hashlib.sha256()
+        digest.update(struct.pack("<IIII", machine, entry_point, image_base, alignment))
+        for name in LAYOUT_SECTIONS:
+            virtual_size, address, raw_size, characteristics, content = sections[name]
+            digest.update(name + b"\0")
+            digest.update(struct.pack("<IIII", virtual_size, address, raw_size, characteristics))
+            digest.update(content)
+        return digest.hexdigest()
+    except (struct.error, OverflowError):
+        return None
+
+
+def verify_game_executable(executable: Path) -> str:
+    """Accept only the tested file or one with identical mapped code/data."""
+    data = Path(executable).read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    if digest == SUPPORTED_SHA256:
+        return digest
+    if executable_layout_fingerprint(data) == SUPPORTED_LAYOUT_SHA256:
+        return digest
+    raise RuntimeError(
+        "Unsupported BlackOps.exe build for memory saves.\n"
+        f"File: {executable}\nSHA-256: {digest}\nSize: {len(data):,} bytes\n"
+        "Its game code or memory layout differs from the tested build. "
+        "No game memory or files were changed. Share this SHA-256 with the mod maintainer to request support.")
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -140,9 +205,7 @@ class GameProcess:
             executable = Path(path.value)
             if executable.name.lower() != "blackops.exe":
                 raise RuntimeError(f"Unsupported process: {executable.name}")
-            digest = hashlib.sha256(executable.read_bytes()).hexdigest()
-            if digest != SUPPORTED_SHA256:
-                raise RuntimeError(f"Unsupported BlackOps.exe build ({digest}). No game memory was changed.")
+            verify_game_executable(executable)
             if self.read(BASE, 2) != b"MZ":
                 raise RuntimeError("The game image is not at the expected base address")
         except BaseException:

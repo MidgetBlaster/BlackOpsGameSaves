@@ -77,7 +77,24 @@ def test_steam_library_discovery():
                 assert find_game(root / "unrelated" / "mods" / "source") == game.resolve()
 
 
+def test_unsupported_build_stops_before_installing():
+    with TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+        game = Path(temporary) / "Call of Duty Black Ops"
+        game.mkdir()
+        executable = game / "BlackOps.exe"
+        executable.write_bytes(b"different game build")
+        with patch.object(core, "SUPPORTED_SHA256", "0" * 64):
+            try:
+                install(game, game)
+            except RuntimeError as error:
+                assert hashlib.sha256(executable.read_bytes()).hexdigest() in str(error)
+            else:
+                raise AssertionError("Installer accepted an unsupported game build")
+        assert not (game / "mods" / "Game Save").exists()
+
+
 if __name__ == "__main__":
     test_install()
     test_steam_library_discovery()
+    test_unsupported_build_stops_before_installing()
     print("Game Save installation and reinstallation passed")

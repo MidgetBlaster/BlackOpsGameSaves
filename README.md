@@ -29,8 +29,11 @@ Use **Export selected** or **Export all** to create a `.bo1gamesave` file and
 In a map's save list, hold Shift to select a range or Ctrl to select individual
 saves, then choose **Export selected** or **Delete selected**.
 
-The compatible game executable has SHA-256
+The tested game executable has SHA-256
 `1141278c4599025c85d0e27d1629a5e8ecb0568559c4d9653e693018c3b25f1e`.
+The installer also accepts a different file when its mapped game code and data
+are identical. Other builds show their path and SHA-256 so compatibility can be
+investigated without risking a memory save on unknown addresses.
 Co-op restore still needs a live test with the same host and players. See
 [CHECKPOINTS.md](CHECKPOINTS.md) for usage details and current limits.
 
@@ -41,7 +44,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.6
+python package_release.py v1.0.7
 ```
 
 The build script produces `BlackOpsGameSaves.exe`, `InstallGameSaveMod.exe`,
@@ -66,7 +69,7 @@ Push the prepared branch and release tag with:
 
 ```powershell
 git push -u origin main
-git push origin v1.0.6
+git push origin v1.0.7
 ```
 
 The tag push starts the Windows release workflow. The local release package is

@@ -1,4 +1,11 @@
-# Black Ops Game Saves v1.0.6
+# Black Ops Game Saves v1.0.7
+
+- Allows BlackOps.exe files with identical mapped game code and data even when
+  resources or packaging change the overall file hash.
+- Shows the selected executable path, hash, and size when a genuinely different
+  build is blocked. Memory saves remain restricted to verified layouts.
+
+## v1.0.6
 
 - Makes each map row smaller and shows the save count only when hovering over it.
 

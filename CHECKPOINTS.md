@@ -8,8 +8,12 @@ back into memory during a later run.
 This uses the save layout and fixed addresses documented in the
 [decompiled engine](https://github.com/MisaDev4/bo1-zombies-decompiled),
 especially `src/game_sp/g_sp_savegame.h` and `g_sp_savegame.cpp`. It accepts
-only the installed `BlackOps.exe` with SHA-256
-`1141278c4599025c85d0e27d1629a5e8ecb0568559c4d9653e693018c3b25f1e`.
+the tested `BlackOps.exe` with SHA-256
+`1141278c4599025c85d0e27d1629a5e8ecb0568559c4d9653e693018c3b25f1e`,
+or a file whose mapped game code and data have the same layout and bytes.
+Resource and packaging differences are allowed only when that check matches.
+Other builds remain blocked because the memory addresses are build-specific;
+the installer now displays the selected file path and SHA-256 for diagnosis.
 This is a process-memory tool for the retail game, not a build of the
 decompiled executable. It never uses `players/save/*.svg`.
 

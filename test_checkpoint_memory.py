@@ -1,10 +1,58 @@
 import tempfile
 import base64
+import hashlib
 from contextlib import contextmanager
 from pathlib import Path
 import struct
 from unittest.mock import patch
 import checkpoint_memory as c
+
+
+def test_executable_compatibility():
+    sections = (*c.LAYOUT_SECTIONS, b".rsrc")
+    image = bytearray(0x600)
+    image[:2] = b"MZ"
+    struct.pack_into("<I", image, 0x3C, 0x80)
+    image[0x80:0x84] = b"PE\0\0"
+    struct.pack_into("<HH", image, 0x84, 0x14C, len(sections))
+    struct.pack_into("<H", image, 0x94, 0xE0)
+    struct.pack_into("<H", image, 0x98, 0x10B)
+    struct.pack_into("<I", image, 0x98 + 16, 0x1200)
+    struct.pack_into("<II", image, 0x98 + 28, 0x400000, 0x1000)
+    table = 0x98 + 0xE0
+    for index, name in enumerate(sections):
+        offset = table + index * 40
+        image[offset:offset + 8] = name.ljust(8, b"\0")
+        struct.pack_into("<IIII", image, offset + 8, 32, 0x1000 * (index + 1),
+                         32, 0x400 + index * 32)
+        struct.pack_into("<I", image, offset + 36, 0x60000020)
+        image[0x400 + index * 32:0x420 + index * 32] = bytes([index + 1]) * 32
+    original = bytes(image)
+    layout = c.executable_layout_fingerprint(original)
+    assert layout and c.executable_layout_fingerprint(b"not a PE file") is None
+    with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+        executable = Path(directory) / "BlackOps.exe"
+        with (patch.object(c, "SUPPORTED_SHA256", hashlib.sha256(original).hexdigest()),
+              patch.object(c, "SUPPORTED_LAYOUT_SHA256", layout)):
+            executable.write_bytes(original)
+            assert c.verify_game_executable(executable) == hashlib.sha256(original).hexdigest()
+            image[0x400 + 5 * 32] ^= 1  # Changed resources do not move code or data.
+            executable.write_bytes(image)
+            assert c.verify_game_executable(executable) == hashlib.sha256(image).hexdigest()
+            image[0x400] ^= 1  # Changed game code must be rejected.
+            executable.write_bytes(image)
+            try:
+                c.verify_game_executable(executable)
+            except RuntimeError as error:
+                assert hashlib.sha256(image).hexdigest() in str(error)
+            else:
+                raise AssertionError("Changed game code was accepted")
+    known = c.GAME / "BlackOps.exe"
+    if known.is_file() and hashlib.sha256(known.read_bytes()).hexdigest() == c.SUPPORTED_SHA256:
+        assert c.executable_layout_fingerprint(known.read_bytes()) == c.SUPPORTED_LAYOUT_SHA256
+
+
+test_executable_compatibility()
 
 class FakeGame:
     def __init__(self):

@@ -25,11 +25,12 @@ def tracked_sources() -> list[Path]:
     return paths
 
 
-def package(version: str = "v1.0.0") -> Path:
+def package(version: str = "v1.0.0", program_directory: Path | None = None) -> Path:
     if not version.startswith("v") or any(char in version for char in "/\\: "):
         raise ValueError("Use a version such as v1.0.0")
     RELEASE.mkdir(exist_ok=True)
-    programs = [RELEASE / name for name in PROGRAMS]
+    program_directory = Path(program_directory) if program_directory else RELEASE
+    programs = [program_directory / name for name in PROGRAMS]
     for path in programs:
         if not path.is_file():
             raise FileNotFoundError(f"Build the Windows programs first: {path}")
@@ -59,4 +60,5 @@ def package(version: str = "v1.0.0") -> Path:
 
 
 if __name__ == "__main__":
-    print(package(sys.argv[1] if len(sys.argv) > 1 else "v1.0.0"))
+    print(package(sys.argv[1] if len(sys.argv) > 1 else "v1.0.0",
+                  Path(sys.argv[2]) if len(sys.argv) > 2 else None))
