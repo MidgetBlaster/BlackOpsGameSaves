@@ -9,8 +9,9 @@ Black Ops Game Saves — Windows installer
 
 This one installer carries the Game Save mod, loader, map thumbnails, save
 manager, and icon. You can send only this installer EXE to another user. It does
-not contain personal checkpoints. In the save manager,
-use Export selected or Export all to make a .bo1gamesave file, copy that
+not contain personal checkpoints. The manager's map selection screen uses the
+Zombies lobby background and shows each selected map's three newest saves and
+total save count. Use Export selected or Export all to make a .bo1gamesave file, copy that
 file to another computer, and choose Import saves there.
 Hold Shift or Ctrl in a map's save list to select several saves before
 using Export selected or Delete selected.

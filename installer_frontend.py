@@ -34,6 +34,8 @@ def verify_bundle() -> tuple[Path, Path, Path]:
         members = set(archive.namelist())
         expected = set(game_save_installer.MOD_FILES)
         expected.update(f"ui textures/png/{name}" for name in game_save_installer.MAP_THUMBNAILS)
+        expected.update(f"ui textures/{name}" for name in
+                        (*game_save_installer.MAP_PREVIEWS, *game_save_installer.MENU_BACKGROUND))
         expected.update(("Game Save.iwd", "installer/game_mod.zip"))
         missing = sorted(expected - members)
         if missing:
@@ -41,10 +43,13 @@ def verify_bundle() -> tuple[Path, Path, Path]:
         damaged = archive.testzip()
         if damaged:
             raise ValueError(f"The installer package contains a damaged file: {damaged}")
-        for name in game_save_installer.MAP_THUMBNAILS:
-            artwork = archive.read(f"ui textures/png/{name}")
+        pngs = [f"png/{name}" for name in game_save_installer.MAP_THUMBNAILS]
+        pngs.extend(game_save_installer.MAP_PREVIEWS)
+        pngs.extend(name for name in game_save_installer.MENU_BACKGROUND if name.endswith(".png"))
+        for name in pngs:
+            artwork = archive.read(f"ui textures/{name}")
             if not artwork.startswith(b"\x89PNG\r\n\x1a\n"):
-                raise ValueError(f"The installer contains an invalid map thumbnail: {name}")
+                raise ValueError(f"The installer contains invalid map artwork: {name}")
         with zipfile.ZipFile(BytesIO(archive.read("installer/game_mod.zip"))) as loader:
             missing_loader = sorted(set(game_save_installer.PACKAGE_FILES) - set(loader.namelist()))
             if missing_loader:

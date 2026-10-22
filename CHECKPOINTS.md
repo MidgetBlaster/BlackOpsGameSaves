@@ -59,9 +59,10 @@ when missing or different, backing up any replaced files under
 `Game Save` installation are kept. Later, open the manager with
 `mods/Game Save/Open Game Save.cmd`.
 
-- The first screen shows the supplied Zombies map artwork in small rows, with
-  each thumbnail to the left of its map title. Hover over a row to see its
-  save count. Select a map to see every save
+- The first screen uses the Zombies lobby frame as its background. Map titles
+  appear in rows on the left; the selected row turns white with black text.
+  The map preview appears on the right, with its three most recent saves and
+  total save count below it. Click the preview or the total count to see every save
   for that map by title, round, player mode
   or count, and date and time. The map artwork remains on the left and the
   selected save's details appear on the right. Turn the mouse wheel over the

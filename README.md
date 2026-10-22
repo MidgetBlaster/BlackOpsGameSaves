@@ -23,6 +23,9 @@ executable before copying anything. It installs the Game Save mod, map
 thumbnails, `game_mod` loader, manager, and icon together. Only the installer
 EXE is needed on another machine; all required files are embedded. Personal checkpoints
 are never included in the installer, and existing checkpoints are retained.
+The map screen uses the Zombies lobby frame, shows maps in rows on the left,
+and previews the selected map, its three newest saves, and its total save count
+on the right.
 
 The manager needs Administrator access to read and write the game's memory.
 It watches rounds while open. Press F11 in the game for an extra manual save.
@@ -46,7 +49,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.10
+python package_release.py v1.0.11
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,
@@ -59,6 +62,7 @@ Run the local checks with:
 
 ```powershell
 python test_save_library.py
+python test_checkpoint_gallery.py
 python test_game_save_installer.py
 python test_game_launcher.py
 python test_fov_keeper.py
@@ -71,7 +75,7 @@ Push the prepared branch and release tag with:
 
 ```powershell
 git push -u origin main
-git push origin v1.0.10
+git push origin v1.0.11
 ```
 
 The tag push starts the Windows release workflow. The local release package is

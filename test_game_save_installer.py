@@ -13,7 +13,8 @@ from zipfile import ZipFile
 import checkpoint_memory as core
 import game_save_installer
 from game_save_installer import (MOD_FILES, MOD_FOLDERS, PACKAGE_FILES,
-                                 MAP_THUMBNAILS, find_game, install, install_all)
+                                 MAP_THUMBNAILS, MAP_PREVIEWS, MENU_BACKGROUND,
+                                 find_game, install, install_all)
 
 
 def test_install():
@@ -33,6 +34,10 @@ def test_install():
         for name in MAP_THUMBNAILS:
             (thumbnails / name).write_bytes(
                 (Path(__file__).parent / "ui textures" / "png" / name).read_bytes())
+        for name in (*MAP_PREVIEWS, *MENU_BACKGROUND):
+            destination = source / "ui textures" / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes((Path(__file__).parent / "ui textures" / name).read_bytes())
         (source / "devcommands.iwd").write_bytes(b"mod iwd")
         saves = source / "checkpoint_saves"
         saves.mkdir()
@@ -128,6 +133,9 @@ def test_complete_bundle_installs_artwork_and_manager():
                 expected = (source / "ui textures" / "png" / name).read_bytes()
                 assert expected.startswith(b"\x89PNG\r\n\x1a\n")
                 assert (target / "ui textures" / "png" / name).read_bytes() == expected
+            for name in (*MAP_PREVIEWS, *MENU_BACKGROUND):
+                expected = (source / "ui textures" / name).read_bytes()
+                assert (target / "ui textures" / name).read_bytes() == expected
             repeat = install_all(source, game, manager, icon)
             assert repeat["app_files"] == 0
             assert not repeat["runtime_files"]

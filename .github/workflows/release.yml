@@ -32,6 +32,7 @@ jobs:
           python test_checkpoint_memory.py
           python test_checkpoint_watch.py
           python test_checkpoint_stats.py
+          python test_checkpoint_gallery.py
           python test_save_library.py
           python test_game_save_installer.py
           python test_game_launcher.py

@@ -1,4 +1,12 @@
-# Black Ops Game Saves v1.0.10
+# Black Ops Game Saves v1.0.11
+
+- Redesigns map selection around the Zombies lobby frame: map rows on the left,
+  a wide selected-map preview on the right, and the three newest saves below.
+- Shows each map's total save count in its preview section. Selected and hovered
+  map rows turn white with black text; save-count hover tips are removed.
+- Bundles the lobby background and all eleven wide map previews in the installer.
+
+## v1.0.10
 
 - Adds a welcome page with Install Game Save and Cancel, followed by a game
   folder page with Install and Cancel.

@@ -24,31 +24,47 @@ from save_library import SaveLibrary
 import steam_identity
 
 
-BG = "#0d0d0d"
-SURFACE = "#181818"
-PANEL = "#242424"
-BORDER = "#3a3a3a"
+BG = "#160607"
+SURFACE = "#20090b"
+PANEL = "#301115"
+BORDER = "#572126"
 TEXT = "#f0f0f0"
-MUTED = "#a6a6a6"
-ACCENT = "#d5d5d5"
+MUTED = "#c3aaaa"
+ACCENT = "#e9dddd"
 MAP_ART = {
     "zombie_theater": ("Kino der Toten", "zombie_theater"),
     "zombie_pentagon": ("Five", "zombie_pentagon"),
     "zombietron": ("Dead Ops Arcade", "zombietron"),
-    "zombie_cosmodrome": ("Ascension", "zombie_cosmo"),
-    "zombie_coast": ("Call of the Dead", "zombie_coast"),
-    "zombie_temple": ("Shangri-La", "zombie_temple"),
-    "zombie_moon": ("Moon", "zombie_moon"),
     "zombie_cod5_prototype": ("Nacht der Untoten", "loadscreen_zombie_prototype_mini"),
     "zombie_cod5_asylum": ("Verrückt", "loadscreen_zombie_asylum_mini"),
     "zombie_cod5_sumpf": ("Shi No Numa", "loadscreen_zombie_sumpf_mini"),
     "zombie_cod5_factory": ("Der Riese", "loadscreen_zombie_factory_mini"),
+    "zombie_cosmodrome": ("Ascension", "zombie_cosmo"),
+    "zombie_coast": ("Call of the Dead", "zombie_coast"),
+    "zombie_temple": ("Shangri-La", "zombie_temple"),
+    "zombie_moon": ("Moon", "zombie_moon"),
 }
 DISPLAY_MODES = ("Windowed", "Fullscreen", "Borderless")
 
 
 def map_title(map_name: str) -> str:
     return MAP_ART.get(map_name, (map_name.replace("_", " ").title(), None))[0]
+
+
+def recent_map_saves(saves: dict, map_name: str, category: str, limit: int = 3) -> list:
+    """Return the newest saves shown beside a map on the selection page."""
+    entries = [(name, entry) for name, entry in saves.items()
+               if entry.get("map") == map_name and
+               (category != "Imported saves" or entry.get("imported"))]
+
+    def timestamp(item):
+        try:
+            return datetime.fromisoformat(item[1].get("saved_at", "")).timestamp()
+        except (TypeError, ValueError):
+            return float("-inf")
+
+    entries.sort(key=timestamp, reverse=True)
+    return entries[:limit]
 
 
 def save_date(value: str, *, long: bool = False) -> str:
@@ -87,7 +103,7 @@ class CheckpointApp(tk.Tk):
         except tk.TclError:
             pass
         self.geometry("1200x800")
-        self.minsize(1010, 670)
+        self.minsize(1010, 700)
         try:
             recovered = core.promote_recovery()
         except (OSError, RuntimeError, KeyError):
@@ -109,9 +125,9 @@ class CheckpointApp(tk.Tk):
         self.current_session_legacy = None
         self.current_map = None
         self.map_images = {}
-        self.map_hint = None
-        self.map_hint_label = None
-        self.map_hint_hide = None
+        self.gallery_selected_map = None
+        self.gallery_rows = {}
+        self.gallery_maps = []
         self.busy = False
         self.closing = False
         self.launch_after_close = None
@@ -147,6 +163,16 @@ class CheckpointApp(tk.Tk):
         self.save_timing = tk.StringVar(value=preferred_timing if preferred_timing in core.SAVE_TIMINGS
                                         else core.SAVE_TIMINGS[0])
         self.configure(background=BG)
+        try:
+            background_path = (core.ROOT / "ui textures" / "png" /
+                               "menu_zombie_lobby_frame_outer_ingame_background.png")
+            self.background_image = tk.PhotoImage(file=str(background_path))
+            self.background_label = tk.Label(self, image=self.background_image,
+                                             bg=BG, bd=0, highlightthickness=0)
+            self.background_label.place(relx=0, rely=0, relwidth=1, relheight=1)
+            self.background_label.lower()
+        except tk.TclError:
+            self.background_image = None
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("TFrame", background=BG)
@@ -187,22 +213,19 @@ class CheckpointApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.close)
 
     def _build(self):
-        heading = tk.Frame(self, bg=SURFACE, padx=22, pady=17)
+        heading = tk.Frame(self, bg=SURFACE, padx=22, pady=9)
         heading.pack(fill="x")
         tk.Label(heading, text="GAME SAVE  ·  BLACK OPS ZOMBIES", bg=SURFACE, fg=ACCENT,
                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        tk.Label(heading, text="Checkpoint saves", bg=SURFACE, fg=TEXT,
-                 font=("Segoe UI", 21, "bold")).pack(anchor="w")
-        tk.Label(heading, text="Choose a map, then choose a checkpoint to continue.",
-                 bg=SURFACE, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w", pady=(3, 0))
-
-        outer = ttk.Frame(self, padding=18)
+        self.heading_title = tk.Label(heading, text="MISSION SELECT", bg=SURFACE, fg=TEXT,
+                                      font=("Arial Narrow", 26, "bold"))
+        self.heading_title.pack(anchor="w")
+        outer = ttk.Frame(self, padding=10)
         outer.pack(fill="both", expand=True)
         self.gallery_page = ttk.Frame(outer)
         self.gallery_page.pack(fill="both", expand=True)
         gallery_heading = ttk.Frame(self.gallery_page)
-        gallery_heading.pack(fill="x", pady=(0, 8))
-        ttk.Label(gallery_heading, text="Choose a map", font=("Segoe UI", 16, "bold")).pack(side="left")
+        gallery_heading.pack(fill="x", pady=(0, 3))
         ttk.Button(gallery_heading, text="Import saves", command=self.import_saves).pack(side="right")
         ttk.Button(gallery_heading, text="Export all", command=self.export_all).pack(side="right", padx=(0, 8))
         for label in ("All saves", "Imported saves"):
@@ -210,15 +233,8 @@ class CheckpointApp(tk.Tk):
                             command=self.refresh).pack(side="right", padx=(0, 12))
         self.gallery_canvas = tk.Canvas(self.gallery_page, bg=BG, highlightthickness=0, bd=0)
         self.gallery_canvas.pack(fill="both", expand=True)
-        self.gallery_grid = tk.Frame(self.gallery_canvas, bg=BG)
-        self.gallery_window = self.gallery_canvas.create_window((0, 0), window=self.gallery_grid,
-                                                                 anchor="nw")
-        self.gallery_grid.bind("<Configure>", lambda _event: self.gallery_canvas.configure(
-            scrollregion=self.gallery_canvas.bbox("all")))
-        self.gallery_canvas.bind("<Configure>", lambda event: self.gallery_canvas.itemconfigure(
-            self.gallery_window, width=event.width))
+        self.gallery_canvas.bind("<Configure>", lambda _event: self._render_gallery())
         self._bind_wheel(self.gallery_canvas, self._scroll_gallery)
-        self._bind_wheel(self.gallery_grid, self._scroll_gallery)
 
         self.saves_page = ttk.Frame(outer)
         top = ttk.Frame(self.saves_page)
@@ -366,34 +382,6 @@ class CheckpointApp(tk.Tk):
     def _scroll_saves(self, event):
         self.tree.yview_scroll(self._wheel_steps(event), "units")
         return "break"
-
-    def _show_map_hint(self, event, count: int):
-        if self.map_hint_hide is not None:
-            self.after_cancel(self.map_hint_hide)
-            self.map_hint_hide = None
-        if self.map_hint is None:
-            self.map_hint = tk.Toplevel(self)
-            self.map_hint.overrideredirect(True)
-            self.map_hint.attributes("-topmost", True)
-            self.map_hint.configure(bg=BORDER)
-            self.map_hint_label = tk.Label(self.map_hint, bg=PANEL, fg=TEXT,
-                                           font=("Segoe UI", 9), padx=8, pady=4)
-            self.map_hint_label.pack(padx=1, pady=1)
-        self.map_hint_label.configure(text=f"{count} {'save' if count == 1 else 'saves'}")
-        self.map_hint.geometry(f"+{event.x_root + 14}+{event.y_root + 16}")
-        self.map_hint.deiconify()
-
-    def _hide_map_hint(self):
-        if self.map_hint_hide is not None:
-            self.after_cancel(self.map_hint_hide)
-            self.map_hint_hide = None
-        if self.map_hint is not None:
-            self.map_hint.withdraw()
-
-    def _schedule_map_hint_hide(self, _event):
-        if self.map_hint_hide is not None:
-            self.after_cancel(self.map_hint_hide)
-        self.map_hint_hide = self.after(80, self._hide_map_hint)
 
     def _update_overwrite_button(self):
         overwrite = self.save_policy.get() == "Replace started save"
@@ -640,51 +628,156 @@ class CheckpointApp(tk.Tk):
         self._render_details()
 
     def _render_gallery(self):
-        self._hide_map_hint()
-        for child in self.gallery_grid.winfo_children():
-            child.destroy()
+        canvas = self.gallery_canvas
+        previous_scroll = canvas.yview()[0]
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 1000)
+        height = max(canvas.winfo_height(), 520)
+        if self.background_image is not None:
+            canvas.create_image(width // 2, 0, image=self.background_image, anchor="n")
+        saves = self.library.data["saves"]
         counts = {}
-        for entry in self.library.data["saves"].values():
+        for entry in saves.values():
             if self.category.get() == "Imported saves" and not entry.get("imported"):
                 continue
-            counts[entry.get("map", "")] = counts.get(entry.get("map", ""), 0) + 1
+            map_name = entry.get("map", "")
+            counts[map_name] = counts.get(map_name, 0) + 1
         maps = list(MAP_ART) if self.category.get() != "Imported saves" else [
             name for name in MAP_ART if counts.get(name)]
         maps.extend(name for name in counts if name and name not in MAP_ART)
-        self.gallery_grid.columnconfigure(0, weight=1)
+        self.gallery_maps = maps
+        if self.gallery_selected_map not in maps:
+            self.gallery_selected_map = maps[0] if maps else None
+        self.gallery_rows.clear()
+
+        left_x = 28
+        left_width = min(435, int(width * 0.38))
+        row_top = 20
+        row_height = 38
+        if not maps:
+            canvas.create_text(left_x + 12, row_top + 12, text="NO MAP SAVES FOUND",
+                               anchor="w", fill=TEXT, font=("Arial Narrow", 16, "bold"))
         for index, map_name in enumerate(maps):
-            card = tk.Frame(self.gallery_grid, bg=SURFACE, height=44, cursor="hand2")
-            card.grid(row=index, column=0, padx=2, pady=1, sticky="ew")
-            card.pack_propagate(False)
-            art_name = MAP_ART.get(map_name, ("", None))[1]
-            image_label = None
+            y = row_top + index * row_height
+            selected = map_name == self.gallery_selected_map
+            tag = f"gallery-map-{index}"
+            rectangle = canvas.create_rectangle(
+                left_x, y, left_x + left_width, y + row_height - 2,
+                fill="#f5f4f1" if selected else "#1c090a",
+                outline="#f5f4f1" if selected else "#4b171b", width=1,
+                tags=(tag,))
+            title = '"FIVE"' if map_name == "zombie_pentagon" else map_title(map_name).upper()
+            text = canvas.create_text(left_x + 18, y + (row_height - 2) // 2,
+                                      text=title, anchor="w",
+                                      fill="#0d0d0d" if selected else "#f1eeee",
+                                      font=("Arial Narrow", 17, "bold"), tags=(tag,))
+            self.gallery_rows[map_name] = (rectangle, text)
+            canvas.tag_bind(tag, "<Enter>", lambda _event, key=map_name:
+                            self._highlight_gallery_row(key, True))
+            canvas.tag_bind(tag, "<Leave>", lambda _event, key=map_name:
+                            self._highlight_gallery_row(key, False))
+            canvas.tag_bind(tag, "<Button-1>", lambda _event, key=map_name:
+                            self._select_gallery_map(key))
+            canvas.tag_bind(tag, "<Double-Button-1>", lambda _event, key=map_name:
+                            self.show_map(key))
+
+        selected = self.gallery_selected_map
+        if selected:
+            right_x = left_x + left_width + 52
+            right_width = width - right_x - 25
+            center_x = right_x + right_width // 2
+            canvas.create_text(center_x, 29, text=map_title(selected).upper(),
+                               fill="#f7f3f2", font=("Arial Narrow", 22, "bold"))
+            art_name = MAP_ART.get(selected, ("", None))[1]
+            preview = None
             if art_name:
                 try:
-                    key = f"list:{art_name}"
+                    key = f"preview:{art_name}"
                     if key not in self.map_images:
-                        path = core.ROOT / "ui textures" / "png" / f"{art_name}.png"
-                        self.map_images[key] = tk.PhotoImage(file=str(path)).subsample(8, 8)
-                    image_label = tk.Label(card, image=self.map_images[key], bg=SURFACE,
-                                           cursor="hand2")
-                    image_label.pack(side="left", padx=(6, 10), pady=5)
-                    image_label.bind("<Button-1>", lambda _event, key=map_name: self.show_map(key))
+                        path = core.ROOT / "ui textures" / "previews" / f"{art_name}.png"
+                        self.map_images[key] = tk.PhotoImage(file=str(path))
+                    preview = self.map_images[key]
                 except tk.TclError:
                     pass
-            name_label = tk.Label(card, text=map_title(map_name), bg=SURFACE, fg=TEXT,
-                                  font=("Segoe UI", 10, "bold"), cursor="hand2")
-            name_label.pack(side="left")
-            count = counts.get(map_name, 0)
-            for widget in (card, name_label, image_label):
-                if widget is None:
-                    continue
-                widget.bind("<Button-1>", lambda _event, key=map_name: self.show_map(key))
-                widget.bind("<Enter>", lambda event, saves=count: self._show_map_hint(event, saves))
-                widget.bind("<Leave>", self._schedule_map_hint_hide)
-                self._bind_wheel(widget, self._scroll_gallery)
+            image_top = 55
+            if preview is not None:
+                image_id = canvas.create_image(center_x, image_top, image=preview,
+                                               anchor="n", tags=("gallery-preview",))
+                canvas.tag_bind(image_id, "<Button-1>",
+                                lambda _event, key=selected: self.show_map(key))
+                canvas.tag_bind(image_id, "<Enter>",
+                                lambda _event: canvas.configure(cursor="hand2"))
+                canvas.tag_bind(image_id, "<Leave>",
+                                lambda _event: canvas.configure(cursor=""))
+            else:
+                canvas.create_rectangle(center_x - 220, image_top, center_x + 220,
+                                        image_top + 250, fill="#21090a", outline="#673237")
+                canvas.create_text(center_x, image_top + 125, text="MAP IMAGE UNAVAILABLE",
+                                   fill=MUTED, font=("Arial Narrow", 15, "bold"))
+
+            section_y = 320
+            canvas.create_text(right_x, section_y, text="RECENT SAVES", anchor="w",
+                               fill=TEXT, font=("Arial Narrow", 15, "bold"))
+            count = counts.get(selected, 0)
+            count_id = canvas.create_text(
+                right_x + right_width, section_y,
+                text=f"{count} {'SAVE' if count == 1 else 'SAVES'} TOTAL  ·  VIEW ALL  →",
+                anchor="e", fill=TEXT, font=("Arial Narrow", 13, "bold"))
+            canvas.tag_bind(count_id, "<Button-1>",
+                            lambda _event, key=selected: self.show_map(key))
+            recent = recent_map_saves(saves, selected, self.category.get())
+            if not recent:
+                canvas.create_text(right_x, section_y + 42, text="No saved checkpoints for this map yet.",
+                                   anchor="w", fill=MUTED, font=("Segoe UI", 11))
+            for index, (name, entry) in enumerate(recent):
+                y = section_y + 22 + index * 51
+                tag = f"gallery-save-{index}"
+                canvas.create_rectangle(right_x, y, right_x + right_width, y + 47,
+                                        fill="#23090c", outline="#683036", tags=(tag,))
+                canvas.create_text(right_x + 13, y + 14,
+                                   text=entry.get("title") or "Save Game", anchor="w",
+                                   fill=TEXT, font=("Segoe UI", 10, "bold"), tags=(tag,))
+                canvas.create_text(right_x + 13, y + 34,
+                                   text=f"Round {entry.get('round', '?')}  ·  {save_date(entry.get('saved_at', ''))}",
+                                   anchor="w", fill=MUTED, font=("Segoe UI", 9), tags=(tag,))
+                canvas.tag_bind(tag, "<Button-1>",
+                                lambda _event, save_name=name: self._open_gallery_save(save_name))
+                canvas.tag_bind(tag, "<Enter>",
+                                lambda _event: canvas.configure(cursor="hand2"))
+                canvas.tag_bind(tag, "<Leave>",
+                                lambda _event: canvas.configure(cursor=""))
+        canvas.configure(scrollregion=(0, 0, width, max(height, 535)))
+        canvas.yview_moveto(previous_scroll)
+
+    def _highlight_gallery_row(self, map_name: str, highlighted: bool):
+        row = self.gallery_rows.get(map_name)
+        if not row:
+            return
+        active = highlighted or map_name == self.gallery_selected_map
+        self.gallery_canvas.itemconfigure(row[0], fill="#f5f4f1" if active else "#1c090a",
+                                          outline="#f5f4f1" if active else "#4b171b")
+        self.gallery_canvas.itemconfigure(row[1], fill="#0d0d0d" if active else "#f1eeee")
+        self.gallery_canvas.configure(cursor="hand2" if highlighted else "")
+
+    def _select_gallery_map(self, map_name: str):
+        self.gallery_selected_map = map_name
+        self._render_gallery()
+
+    def _open_gallery_save(self, name: str):
+        entry = self.library.data["saves"].get(name)
+        if not entry:
+            return
+        self.show_map(entry["map"])
+        if self.tree.exists(name):
+            self.tree.selection_set(name)
+            self.tree.focus(name)
+            self.tree.see(name)
+            self._render_details()
 
     def show_map(self, map_name: str):
-        self._hide_map_hint()
+        self.gallery_selected_map = map_name
         self.current_map = map_name
+        self.heading_title.configure(text="SAVED CHECKPOINTS")
         self.map_heading.configure(text=map_title(map_name))
         self.selected_map_caption.configure(text=map_title(map_name))
         art_name = MAP_ART.get(map_name, ("", None))[1]
@@ -705,6 +798,7 @@ class CheckpointApp(tk.Tk):
 
     def show_gallery(self):
         self.current_map = None
+        self.heading_title.configure(text="MISSION SELECT")
         self.saves_page.pack_forget()
         self.gallery_page.pack(fill="both", expand=True, before=self.actions)
         self.refresh()

@@ -40,6 +40,12 @@ MAP_THUMBNAILS = (
     "zombie_moon.png", "zombie_pentagon.png", "zombie_temple.png",
     "zombie_theater.png",
 )
+MAP_PREVIEWS = tuple(f"previews/{name}" for name in MAP_THUMBNAILS)
+MENU_BACKGROUND = (
+    "menu_zombie_lobby_frame_outer_ingame.dds",
+    "png/menu_zombie_lobby_frame_outer_ingame.png",
+    "png/menu_zombie_lobby_frame_outer_ingame_background.png",
+)
 
 
 def _registry_paths() -> list[Path]:
@@ -173,6 +179,7 @@ def install(source: Path, game: Path, package: Path | None = None,
     required = [source / name for name in MOD_FILES]
     required += [source / name for name in MOD_FOLDERS]
     required += [source / "ui textures" / "png" / name for name in MAP_THUMBNAILS]
+    required += [source / "ui textures" / name for name in (*MAP_PREVIEWS, *MENU_BACKGROUND)]
     iwd = source / "Game Save.iwd"
     if not iwd.is_file():
         iwd = source / "devcommands.iwd"
@@ -214,10 +221,14 @@ def install(source: Path, game: Path, package: Path | None = None,
         advance(f"mods/Game Save/{relative.as_posix()}")
     updated_mod += _copy_if_changed(iwd, target / "Game Save.iwd")
     advance("mods/Game Save/Game Save.iwd")
-    for name in MAP_THUMBNAILS:
-        destination = target / "ui textures" / "png" / name
+    for name in (f"png/{item}" for item in MAP_THUMBNAILS):
+        destination = target / "ui textures" / name
         if not destination.is_file():
             raise RuntimeError(f"Map thumbnail was not installed: {destination}")
+    for name in (*MAP_PREVIEWS, *MENU_BACKGROUND):
+        destination = target / "ui textures" / name
+        if not destination.is_file():
+            raise RuntimeError(f"Map artwork was not installed: {destination}")
     target_saves = target / "checkpoint_saves"
     copied_saves = 0
     if saves.is_dir() and saves.resolve() != target_saves.resolve():
