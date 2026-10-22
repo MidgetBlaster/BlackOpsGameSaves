@@ -18,6 +18,7 @@ assert 'bind F10 "exec checkpoint_switch.cfg"' in (core.ROOT / "checkpoint.cfg")
 assert 'bind F4 "exec checkpoint_weapons.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
 assert 'bind F5 "exec checkpoint_speed.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
 assert 'bind F3 "exec checkpoint_speed_local.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
+assert 'bind F2 "exec checkpoint_power.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
 assert 'bind F7 "exec checkpoint_borderless.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
 assert 'bind F6 "exec checkpoint_fullscreen.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
 assert "r_fullscreen 0\nvid_restart" in (core.ROOT / "checkpoint_borderless.cfg").read_text()
@@ -25,6 +26,9 @@ assert "r_fullscreen 1\nvid_restart" in (core.ROOT / "checkpoint_fullscreen.cfg"
 assert game_launcher.legacy_scripts({"script_checksums": [1547989158, 617289, 624409]})
 assert not game_launcher.legacy_scripts({"script_checksums": [1, 2, 3]})
 assert game_launcher.enhanced_scripts({"script_variant": "player_options_v1"})
+assert game_launcher.enhanced_scripts({"script_variant": "player_options_v2"})
+assert game_launcher.round_bridge_scripts({"script_variant": "player_options_v2"})
+assert not game_launcher.round_bridge_scripts({"script_variant": "player_options_v1"})
 assert not game_launcher.enhanced_scripts({"script_checksums": [1, 2, 3]})
 with TemporaryDirectory(dir=core.ROOT) as directory:
     folder = Path(directory)
@@ -34,6 +38,7 @@ with TemporaryDirectory(dir=core.ROOT) as directory:
     (variant_dir / "_zombiemode_pause.gsc").write_bytes(b"pause script")
     (variant_dir / "_checkpoint_coop_pause_v1.gsc").write_bytes(b"old options")
     (variant_dir / "_checkpoint_coop_pause_v2.gsc").write_bytes(b"new options")
+    (variant_dir / "_checkpoint_coop_pause_v3.gsc").write_bytes(b"round bridge options")
     active_script = folder / "_zombiemode.gsc"
     active_script.write_bytes(b"pause script")
     options_script = folder / "_checkpoint_coop_pause.gsc"
@@ -49,6 +54,8 @@ with TemporaryDirectory(dir=core.ROOT) as directory:
         assert options_script.read_bytes() == b"old options"
         game_launcher.prepare_script_variant(legacy=False, enhanced=True)
         assert options_script.read_bytes() == b"new options"
+        game_launcher.prepare_script_variant(legacy=False, enhanced=True, round_bridge=True)
+        assert options_script.read_bytes() == b"round bridge options"
     with (patch.object(core, "ROOT", folder),
           patch.object(game_launcher, "extract_players", return_value=[
               {"client_slot": 0, "equipped_weapon_raw": "ithaca_zm"},
@@ -60,6 +67,11 @@ with TemporaryDirectory(dir=core.ROOT) as directory:
         assert 'set checkpoint_restore_weapon_1 "thompson_upgraded_zm"' in commands
         assert "bad;quit" not in commands
         assert "checkpoint_restore_token" in commands
+        game_launcher.power_restore_config(True)
+        assert (folder / "checkpoint_power.cfg").read_text() == (
+            "set checkpoint_restore_power_on 1\n")
+        assert (folder / "mods" / folder.name / "checkpoint_power.cfg").read_text() == (
+            "set checkpoint_restore_power_on 1\n")
 try:
     game_launcher.launch_command("factory;quit")
 except ValueError:
@@ -190,6 +202,23 @@ with (patch.object(core, "load_archive", return_value=({
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
 assert fresh_game.commands[-2:] == ["F12", (0x73, "F4 equipped weapon restore")]
 
+fresh_game.commands.clear()
+with (patch.object(core, "load_archive", return_value=({
+          "map": "zombie_cod5_factory", "round": 4, "power_on": True,
+          "script_variant": "player_options_v2"}, {})),
+      patch.object(game_launcher, "weapon_restore_config", return_value=False),
+      patch.object(game_launcher, "power_restore_config") as power_config,
+      patch.object(game_launcher, "make_fresh_checkpoint"),
+      patch.object(core, "restore"),
+      patch.object(game_launcher, "wait_for_focus"),
+      patch.object(game_launcher, "wait_for_loaded_round", return_value=True),
+      patch.object(game_launcher.time, "sleep")):
+    game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
+power_config.assert_called_once_with(True)
+assert fresh_game.commands[:3] == [
+    (0x71, "F2 restore power state before Continue"), "F12",
+    (0x71, "F2 restore power state during Continue")]
+
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory", "round": 4}, {})),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore"),
@@ -239,7 +268,7 @@ with (patch.object(core, "game_pid", return_value=4420),
       patch.object(game_launcher, "wait_for_map_ready") as ready):
     game_launcher.switch_running_map(switch_game, "zombie_cod5_factory")
 assert switch_game.commands == ["F10"]
-prepare.assert_called_once_with(legacy=False, enhanced=False)
+prepare.assert_called_once_with(legacy=False, enhanced=False, round_bridge=False)
 assert not (core.ROOT / "checkpoint_switch.cfg").exists()
 assert not (core.ROOT / "mods" / "devcommands" / "checkpoint_switch.cfg").exists()
 assert ready.call_args.kwargs == {"during_opening": True, "allow_stale_checkpoint": True}
@@ -266,7 +295,7 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
     same_map, _ = game_launcher.start_selected_game(core.ARCHIVE / "sample.bo1checkpoint", "Solo")
 assert same_map is switch_game
 switch.assert_called_once_with(switch_game, "zombie_cod5_factory", None,
-                               legacy=False, enhanced=False)
+                               legacy=False, enhanced=False, round_bridge=False)
 
 replacement_game = object()
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory"}, {})),
@@ -289,7 +318,7 @@ with (patch.object(core, "game_pid", return_value=4420),
     fresh_map = game_launcher.start_new_game("zombie_cod5_factory")
 assert fresh_map is switch_game
 switch.assert_called_once_with(switch_game, "zombie_cod5_factory", None,
-                               legacy=False, enhanced=True)
+                               legacy=False, enhanced=True, round_bridge=True)
 assert ready.call_args.kwargs == {"during_opening": False, "allow_stale_checkpoint": True}
 
 print("Launcher readiness and bound save/load keys passed")

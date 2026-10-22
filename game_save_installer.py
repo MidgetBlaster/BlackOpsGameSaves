@@ -28,12 +28,12 @@ MOD_FILES = (
     "checkpoint_stats.py", "save_library.py", "game_launcher.py",
     "fov_keeper.py", "steam_identity.py",
     "game_save_installer.py", "checkpoint.cfg", "checkpoint_speed.cfg",
-    "checkpoint_speed_local.cfg", "checkpoint_borderless.cfg",
+    "checkpoint_speed_local.cfg", "checkpoint_power.cfg", "checkpoint_borderless.cfg",
     "checkpoint_fullscreen.cfg", "display_mode.py", "CHECKPOINTS.md",
     "mod.ff", "mod.csv", "missingasset.csv", "Open Game Save.cmd",
     "BlackOpsGameSaves.ico",
 )
-MOD_FOLDERS = ("maps", "clientscripts", "scriptdata", "ui textures", "installer")
+MOD_FOLDERS = ("maps", "clientscripts", "scriptdata", "ui textures", "ui fonts", "installer")
 MAP_THUMBNAILS = (
     "loadscreen_zombie_asylum_mini.png", "loadscreen_zombie_factory_mini.png",
     "loadscreen_zombie_prototype_mini.png", "loadscreen_zombie_sumpf_mini.png",

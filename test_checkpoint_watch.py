@@ -13,12 +13,16 @@ class FakeGame:
         self.round_change = False
         self.magic = 1000
         self.save_id = 1
+        self.frame = 100
+        self.level_time = 5000
         self.closed = False
 
     def u32(self, address):
         return {core.SCENE_ADDR: 204, core.MENU_ADDR: 0,
                 core.TIMER_ADDR: 300, core.MAGIC_ADDR: self.magic,
-                core.SAVE_QUEUE_COUNT: 0, core.ASYNC_DISK_SAVE: 0}[address]
+                core.SAVE_QUEUE_COUNT: 0, core.ASYNC_DISK_SAVE: 0,
+                core.LEVEL_FRAME_ADDR: self.frame,
+                core.LEVEL_TIME_ADDR: self.level_time}[address]
 
     def foreground(self):
         return True
@@ -33,7 +37,8 @@ class FakeGame:
 
 def exercise(player_f11, skip_initial_round=None, manual_tick=1,
              advance_round=True, advance_again=False, round_end_tick=None,
-             missing_round=False, magic_transition=False, start_round=None):
+             missing_round=False, magic_transition=False, start_round=None,
+             manual_continue=False, save_timing="End of Rounds"):
     game = FakeGame()
     clock = [0.0]
     events = []
@@ -42,11 +47,23 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
         ticks = 0
 
         def is_set(self):
-            return self.ticks >= 7
+            return self.ticks >= (8 if manual_continue and
+                                 save_timing != "End of Rounds" else 7)
 
         def wait(self, _seconds):
             self.ticks += 1
             clock[0] += 3
+            game.frame += 60
+            game.level_time += 3000
+            if manual_continue and self.ticks == 2:
+                game.frame = 10
+                game.level_time = 500
+                game.round = 0
+                game.save_id = 2
+            if manual_continue and self.ticks == 5:
+                game.round_change = True
+            if manual_continue and self.ticks == 6:
+                game.round_change = False
             if player_f11 and self.ticks == manual_tick:
                 game.save_id += 1
             if advance_round and not player_f11 and self.ticks == 3:
@@ -70,8 +87,11 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
     with TemporaryDirectory(dir=core.ROOT) as directory:
         with (patch.object(core, "game_pid", return_value=4420),
               patch.object(core, "GameProcess", return_value=game),
-              patch.object(core, "live_round", side_effect=lambda _game: None if missing_round else game.round),
+              patch.object(core, "live_round", side_effect=lambda _game:
+                           None if missing_round or game.round <= 0 else game.round),
               patch.object(core, "effective_scene", return_value=(204, None)),
+              patch.object(core, "archived_round_for_header",
+                           side_effect=lambda *_: 2 if manual_continue else None),
               patch.object(core, "committed", side_effect=lambda _game: (
                   core.SAVE_A, b"", {"map": "zombie_cod5_factory", "save_id": game.save_id})),
               patch.object(core, "snapshot", side_effect=manual_snapshot),
@@ -80,7 +100,8 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
               patch.object(core, "RECOVERY_FILE", Path(directory) / "latest.bo1checkpoint")):
             core.watch(start_round=start_round, stop_event=Stop(),
                        on_event=lambda *event: events.append(event),
-                       skip_initial_round=skip_initial_round, enable_recovery=False)
+                       skip_initial_round=skip_initial_round, enable_recovery=False,
+                       save_timing=save_timing)
     assert game.closed
     return events
 
@@ -127,6 +148,16 @@ missing_round_manual = exercise(player_f11=True, skip_initial_round=5,
                                 manual_tick=4, start_round=5)
 assert captures(missing_round_manual) == [("manual", 5)]
 
+manually_resumed = exercise(player_f11=False, advance_round=False,
+                             start_round=4, manual_continue=True)
+assert captures(manually_resumed) == [("saved", 2)]
+assert captures(exercise(player_f11=False, advance_round=False, start_round=4,
+                         manual_continue=True,
+                         save_timing="Round Transitions")) == [("saved", 3)]
+assert captures(exercise(player_f11=False, advance_round=False, start_round=4,
+                         manual_continue=True,
+                         save_timing="Start of Round")) == [("saved", 3)]
+
 
 tracker = core.RoundEndTracker()
 assert tracker.update(204, 0, 300, 4, False, 0) is None
@@ -139,7 +170,9 @@ assert transition.update(204, 0, 300, 4, False, 0) is None
 assert transition.update(204, 0, 301, 4, False, 6) is None
 assert transition.update(204, 0, 302, 4, True, 7) is None
 assert transition.update(204, 0, 303, 4, True, 7.5) is None
-assert transition.update(204, 0, 304, 4, True, 7.8) == (4, 4, "round transition")
+assert transition.update(204, 0, 304, 4, True, 7.8) is None
+assert transition.update(204, 0, 305, 5, False, 10) is None
+assert transition.update(204, 0, 306, 5, False, 10.2) == (5, 4, "round transition flag")
 
 round_start = core.RoundEndTracker("Start of Round")
 assert round_start.update(204, 0, 300, 4, False, 0) is None
@@ -147,7 +180,8 @@ assert round_start.update(204, 0, 301, 4, False, 6) is None
 assert round_start.update(204, 0, 302, 4, True, 7) is None
 assert round_start.update(204, 0, 303, 5, True, 8) is None
 assert round_start.update(204, 0, 304, 5, True, 9) is None
-assert round_start.update(204, 0, 305, 5, False, 10) == (5, 4, "round start")
+assert round_start.update(204, 0, 305, 5, False, 10) is None
+assert round_start.update(204, 0, 306, 5, False, 10.5) == (5, 4, "round start flag")
 tracker.mark_saved(4)
 assert tracker.update(204, 0, 304, 4, False, 10) is None
 assert tracker.update(204, 0, 305, 5, False, 11) is None
@@ -201,5 +235,11 @@ assert restored_start.update(204, 0, 302, None, False, 7) is None
 assert restored_start.update(204, 0, 303, None, True, 8) is None
 assert restored_start.update(204, 0, 304, None, False, 9) is None
 assert restored_start.update(204, 0, 305, None, False, 9.5) == (6, 5, "round start flag")
+
+reload = core.LevelReloadTracker()
+assert not reload.update(100, 5000)
+assert not reload.update(160, 8000)
+assert reload.update(20, 1000)
+assert not reload.update(30, 1500)
 
 print("Automatic rounds and player F11 capture passed")

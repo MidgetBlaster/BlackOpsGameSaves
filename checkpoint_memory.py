@@ -68,6 +68,7 @@ SCENES = {5: "kino", 10: "five", 15: "dead_ops", 20: "ascension",
 START_TICKS = {5: 190, 10: 190, 15: 50, 20: 580, 28: 190, 44: 190,
                76: 195, 108: 195, 140: 200, 172: 198, 204: 195}
 SAVE_TIMINGS = ("End of Rounds", "Round Transitions", "Start of Round")
+POWER_MARKER = b"BOGS_POWER_ON_V1"
 MAP_SCENES = {
     "zombie_theater": 5,
     "zombie_pentagon": 10,
@@ -420,9 +421,15 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
     options_script = ROOT / "maps" / "_checkpoint_coop_pause.gsc"
     options_variant = (ROOT / "scriptdata" / "checkpoint_variants" /
                        "_checkpoint_coop_pause_v2.gsc")
+    bridge_variant = (ROOT / "scriptdata" / "checkpoint_variants" /
+                      "_checkpoint_coop_pause_v3.gsc")
     if (options_script.is_file() and options_variant.is_file() and
             options_script.read_bytes() == options_variant.read_bytes()):
         metadata["script_variant"] = "player_options_v1"
+    elif (options_script.is_file() and bridge_variant.is_file() and
+          options_script.read_bytes() == bridge_variant.read_bytes()):
+        metadata["script_variant"] = "player_options_v2"
+        metadata["power_on"] = any(POWER_MARKER in part for part in parts)
     pieces = {"save.bin": image, "state.bin": parts[0], "secondary.bin": parts[1]}
     metadata["sha256"] = {name: hashlib.sha256(data).hexdigest() for name, data in pieces.items()}
     temporary = target.with_suffix(".part")
@@ -600,6 +607,7 @@ class RoundEndTracker:
         self.round_change = None
         self.active_since = None
         self.transition_armed = False
+        self.transition_completed_round = None
         self.completed_round = None
         self.pending = None  # save label, completed round, due time, signal
 
@@ -618,6 +626,7 @@ class RoundEndTracker:
         if round_number is None or menu != 0 or timer <= START_TICKS.get(scene, 195):
             self.active_since = None
             self.transition_armed = False
+            self.transition_completed_round = None
             self.round_change = round_change
             return None
 
@@ -630,7 +639,8 @@ class RoundEndTracker:
             # flag did not yield a save, use this transition as a fallback.
             if round_number > previous_round + 1:
                 self.pending = None  # loadgame_continue, not a played round
-            elif self.completed_round != previous_round:
+            elif (self.completed_round != previous_round and
+                  not round_change and previous_change is not True):
                 delay = 0.5 if self.timing == "Start of Round" else 0.4
                 self.pending = (round_number, previous_round, now + delay,
                                 "round start" if self.timing == "Start of Round" else "round counter")
@@ -642,20 +652,26 @@ class RoundEndTracker:
             if (previous_change is False and self.active_since is not None
                     and now - self.active_since >= 5):
                 self.transition_armed = True
-                if self.timing != "Start of Round" and self.completed_round != completed_at_edge:
-                    delay = 0.75 if self.timing == "Round Transitions" else 0.1
-                    self.pending = (round_number, completed_at_edge, now + delay,
-                                    "round transition" if self.timing == "Round Transitions" else "round end")
+                self.transition_completed_round = completed_at_edge
+                if self.timing == "End of Rounds" and self.completed_round != completed_at_edge:
+                    self.pending = (round_number, completed_at_edge, now + 0.1, "round end")
             self.active_since = None
-        elif inferred and previous_change and self.transition_armed:
-            # A restored game's round byte can stay zero. Advance after the
-            # end signal even if a save failed, while retaining its retry.
-            completed = self.round
-            self.round += 1
-            if self.timing == "Start of Round" and self.completed_round != completed:
-                self.pending = (self.round, completed, now + 0.4, "round start flag")
+        elif previous_change and self.transition_armed:
+            # The transition flag clears after between_round_over. A loaded
+            # game's round byte may stay zero, so advance our inferred round.
+            completed = self.transition_completed_round or self.round
+            if inferred:
+                self.round += 1
+            if self.completed_round != completed:
+                if self.timing == "Round Transitions":
+                    self.pending = (self.round, completed, now + 0.1,
+                                    "round transition flag")
+                elif self.timing == "Start of Round":
+                    self.pending = (self.round, completed, now + 0.4,
+                                    "round start flag")
             self.active_since = now
             self.transition_armed = False
+            self.transition_completed_round = None
         elif previous_change is not False or self.active_since is None:
             self.active_since = now
             if previous_change:
@@ -806,6 +822,55 @@ def effective_scene(game: GameProcess, raw_scene: int) -> tuple[int | None, str 
     return MAP_SCENES.get(header["map"]), header["map"]
 
 
+def archived_round_for_header(map_name: str, save_id: int,
+                              save_image: bytes | None = None) -> int | None:
+    """Recover the round of a checkpoint resumed with an in-game Continue."""
+    digest = hashlib.sha256(save_image).hexdigest() if save_image else None
+    # Restore publishes an archive into the other engine buffer. Its two
+    # memfile pointers change even though the saved game is otherwise equal.
+    def portable_digest(image: bytes) -> bytes | None:
+        if len(image) != SAVE_SIZE:
+            return None
+        return hashlib.sha256(image[4:MEMFILE_SIZE] +
+                              image[MEMFILE_SIZE + 4:]).digest()
+
+    portable = portable_digest(save_image) if save_image else None
+    possible_rounds = set()
+    archives = sorted(ARCHIVE.glob("*.bo1checkpoint"),
+                      key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    for path in archives:
+        try:
+            with zipfile.ZipFile(path) as archive:
+                metadata = json.loads(archive.read("manifest.json"))
+                if metadata.get("map") != map_name or metadata.get("save_id") != save_id:
+                    continue
+                number = metadata.get("round")
+                if isinstance(number, int) and number > 0:
+                    possible_rounds.add(number)
+                    if digest is None or metadata.get("sha256", {}).get("save.bin") == digest:
+                        return number
+                    if portable is not None and portable_digest(
+                            archive.read("save.bin")) == portable:
+                        return number
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+            continue
+    return next(iter(possible_rounds)) if len(possible_rounds) == 1 else None
+
+
+class LevelReloadTracker:
+    """Notice a same-process loadgame_continue by the map clock rewinding."""
+
+    def __init__(self):
+        self.frame = None
+        self.level_time = None
+
+    def update(self, frame: int, level_time: int) -> bool:
+        rewound = (self.frame is not None and
+                   (frame + 20 < self.frame or level_time + 1000 < self.level_time))
+        self.frame, self.level_time = frame, level_time
+        return rewound
+
+
 def watch(start_round: int | None = None, stop_event=None, on_event=None, save_lock=None,
           skip_initial_round: int | None = None, enable_recovery: bool = True,
           save_timing: str = "End of Rounds"):
@@ -824,6 +889,8 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
     marker_ready = False
     last_round = None
     last_reported_round = None
+    reload_tracker = LevelReloadTracker()
+    reload_pending = False
     next_recovery = time.monotonic() + RECOVERY_INTERVAL
     unblocker = SaveQueueUnblocker()
     try:
@@ -862,6 +929,8 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                 marker_ready = False
                 last_round = None
                 last_reported_round = None
+                reload_tracker = LevelReloadTracker()
+                reload_pending = False
                 next_recovery = time.monotonic() + RECOVERY_INTERVAL
                 unblocker = SaveQueueUnblocker()
                 if pid:
@@ -879,10 +948,38 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                     timer = game.u32(TIMER_ADDR)
                     magic = game.u32(MAGIC_ADDR)
                     round_change = bool(game.read(ROUND_CHANGE_ADDR, 1)[0])
+                    frame = game.u32(LEVEL_FRAME_ADDR)
+                    level_time = game.u32(LEVEL_TIME_ADDR)
+                    if reload_tracker.update(frame, level_time):
+                        reload_pending = True
+                        marker_ready = False
+                        resume_manual_after = time.monotonic() + 5
+                        print("Detected a same-process checkpoint reload; waiting for its round.",
+                              flush=True)
                     scene, checkpoint_map = effective_scene(game, raw_scene)
                     if unblocker.observe(game, time.monotonic()):
                         print("Cleared a stalled disk write; pending checkpoints can commit to memory.", flush=True)
                     observed_round = live_round(game)
+                    if reload_pending and scene is not None and menu == 0 and timer > START_TICKS[scene]:
+                        try:
+                            reload_address, reload_image, reload_header = committed(game)
+                        except (RuntimeError, OSError):
+                            pass
+                        else:
+                            resumed_round = (observed_round or archived_round_for_header(
+                                reload_header["map"], reload_header["save_id"],
+                                reload_image) or last_round or 1)
+                            tracker = RoundTracker(resumed_round)
+                            end_tracker = RoundEndTracker(save_timing, resumed_round)
+                            skip_initial_round = resumed_round
+                            last_marker = (reload_address, reload_header["map"],
+                                           reload_header["save_id"])
+                            marker_ready = True
+                            last_round = resumed_round
+                            last_reported_round = None
+                            reload_pending = False
+                            print(f"Resumed checkpoint round {resumed_round}; automatic saves rearmed.",
+                                  flush=True)
                     current_round = observed_round or end_tracker.round or tracker.round
                     if current_round is not None:
                         last_round = current_round

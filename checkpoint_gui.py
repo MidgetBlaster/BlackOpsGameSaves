@@ -31,6 +31,25 @@ BORDER = "#572126"
 TEXT = "#f0f0f0"
 MUTED = "#c3aaaa"
 ACCENT = "#e9dddd"
+# The supplied font's internal Windows family name differs from its file name.
+FONT_FAMILY = "HelveticaNeueLT Pro 67 MdCn"
+FONT_FILE = Path("ui fonts") / "Helvetica Neue LT Pro 67 Medium Condensed.otf"
+
+
+def load_private_font() -> bool:
+    """Make the bundled font available to this process without a system install."""
+    if sys.platform != "win32":
+        return False
+    for root in (core.ROOT, Path(getattr(sys, "_MEIPASS", core.ROOT))):
+        path = root / FONT_FILE
+        if path.is_file():
+            gdi = ctypes.WinDLL("gdi32", use_last_error=True)
+            gdi.AddFontResourceExW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
+                                               ctypes.c_void_p]
+            gdi.AddFontResourceExW.restype = ctypes.c_int
+            if gdi.AddFontResourceExW(str(path), 0x10, None):
+                return True
+    return False
 MAP_ART = {
     "zombie_theater": ("Kino der Toten", "zombie_theater"),
     "zombie_pentagon": ("Five", "zombie_pentagon"),
@@ -96,6 +115,7 @@ def launch_as_administrator() -> bool:
 
 class CheckpointApp(tk.Tk):
     def __init__(self):
+        load_private_font()
         super().__init__()
         self.title("Game Save — Black Ops Zombies")
         try:
@@ -129,6 +149,11 @@ class CheckpointApp(tk.Tk):
         self.gallery_selected_map = None
         self.gallery_rows = {}
         self.gallery_maps = []
+        self.gallery_page_index = 0
+        self.gallery_selected_saves = set()
+        self.gallery_anchor_save = None
+        self.gallery_save_rows = {}
+        self.gallery_visible_saves = []
         self.busy = False
         self.closing = False
         self.launch_after_close = None
@@ -158,7 +183,8 @@ class CheckpointApp(tk.Tk):
                                    "Automatic saves happen after each round. F11 makes a manual save.")
         if core.game_pid() is None:
             try:
-                game_launcher.prepare_script_variant(legacy=False, enhanced=True)
+                game_launcher.prepare_script_variant(legacy=False, enhanced=True,
+                                                     round_bridge=True)
             except (OSError, RuntimeError) as error:
                 self.status.set(f"Could not prepare the pause script: {error}")
         self.save_policy = tk.StringVar(value=self.library.data.get("save_policy", "Keep new saves"))
@@ -179,29 +205,33 @@ class CheckpointApp(tk.Tk):
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("TFrame", background=BG)
-        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
-        style.configure("TButton", padding=(10, 7), font=("Segoe UI", 10),
+        style.configure("TLabel", background=BG, foreground=TEXT, font=(FONT_FAMILY, 10))
+        style.configure("TButton", padding=(10, 7), font=(FONT_FAMILY, 10),
                         background=PANEL, foreground=TEXT, bordercolor=BORDER)
         style.map("TButton", background=[("active", "#383838"), ("disabled", SURFACE)],
                   foreground=[("disabled", "#697c96")])
-        style.configure("TEntry", fieldbackground=SURFACE, foreground=TEXT, bordercolor=BORDER)
+        style.configure("TEntry", fieldbackground=SURFACE, foreground=TEXT,
+                        bordercolor=BORDER, font=(FONT_FAMILY, 10))
         style.configure("TCombobox", fieldbackground=SURFACE, background=PANEL,
-                        foreground=TEXT, arrowcolor=TEXT, bordercolor=BORDER)
+                        foreground=TEXT, arrowcolor=TEXT, bordercolor=BORDER,
+                        font=(FONT_FAMILY, 10))
         style.map("TCombobox", fieldbackground=[("readonly", SURFACE)],
                   foreground=[("readonly", TEXT)])
-        style.configure("TCheckbutton", background=BG, foreground=TEXT)
-        style.configure("TRadiobutton", background=BG, foreground=TEXT)
+        style.configure("TCheckbutton", background=BG, foreground=TEXT,
+                        font=(FONT_FAMILY, 10))
+        style.configure("TRadiobutton", background=BG, foreground=TEXT,
+                        font=(FONT_FAMILY, 10))
         style.configure("Vertical.TScrollbar", background=PANEL, troughcolor=BG,
                         bordercolor=BG, arrowcolor=TEXT)
-        style.configure("Treeview", rowheight=43, font=("Segoe UI", 10),
+        style.configure("Treeview", rowheight=43, font=(FONT_FAMILY, 10),
                         background=SURFACE, fieldbackground=SURFACE, foreground=TEXT,
                         bordercolor=BORDER)
         style.map("Treeview", background=[("selected", "#454545")],
                   foreground=[("selected", "#ffffff")])
         style.configure("Treeview.Heading", background=PANEL, foreground=TEXT,
-                        font=("Segoe UI", 10, "bold"))
+                        font=(FONT_FAMILY, 10, "bold"))
         style.layout("Checkpoint.Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
-        style.configure("Checkpoint.Treeview", rowheight=52, font=("Segoe UI", 10),
+        style.configure("Checkpoint.Treeview", rowheight=52, font=(FONT_FAMILY, 10),
                         background=SURFACE, fieldbackground=SURFACE, foreground=TEXT,
                         borderwidth=0, relief="flat")
         style.map("Checkpoint.Treeview", background=[("selected", "#383838")],
@@ -220,22 +250,15 @@ class CheckpointApp(tk.Tk):
         self.heading = heading
         heading.pack(fill="x")
         tk.Label(heading, text="GAME SAVE  ·  BLACK OPS ZOMBIES", bg=SURFACE, fg=ACCENT,
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+                 font=(FONT_FAMILY, 9, "bold")).pack(anchor="w")
         self.heading_title = tk.Label(heading, text="MISSION SELECT", bg=SURFACE, fg=TEXT,
-                                      font=("Arial Narrow", 26, "bold"))
+                                      font=(FONT_FAMILY, 26, "bold"))
         self.heading_title.pack(anchor="w")
         outer = ttk.Frame(self, padding=10)
         self.outer = outer
         outer.pack(fill="both", expand=True)
         self.gallery_page = ttk.Frame(outer)
         self.gallery_page.pack(fill="both", expand=True)
-        gallery_heading = ttk.Frame(self.gallery_page)
-        gallery_heading.pack(fill="x", pady=(0, 3))
-        ttk.Button(gallery_heading, text="Import saves", command=self.import_saves).pack(side="right")
-        ttk.Button(gallery_heading, text="Export all", command=self.export_all).pack(side="right", padx=(0, 8))
-        for label in ("All saves", "Imported saves"):
-            ttk.Radiobutton(gallery_heading, text=label, value=label, variable=self.category,
-                            command=self.refresh).pack(side="right", padx=(0, 12))
         self.gallery_canvas = tk.Canvas(self.gallery_page, bg=BG, highlightthickness=0, bd=0)
         self.gallery_canvas.pack(fill="both", expand=True)
         self.gallery_canvas.bind("<Configure>", lambda _event: self._render_gallery())
@@ -245,7 +268,7 @@ class CheckpointApp(tk.Tk):
         top = ttk.Frame(self.saves_page)
         top.pack(fill="x", pady=(0, 10))
         ttk.Button(top, text="← Maps", command=self.show_gallery).pack(side="left", padx=(0, 16))
-        self.map_heading = ttk.Label(top, text="", font=("Segoe UI", 17, "bold"))
+        self.map_heading = ttk.Label(top, text="", font=(FONT_FAMILY, 17, "bold"))
         self.map_heading.pack(side="left")
         ttk.Button(top, text="Import saves", command=self.import_saves).pack(side="right")
         ttk.Button(top, text="Delete selected", command=self.delete_save).pack(side="right")
@@ -268,7 +291,7 @@ class CheckpointApp(tk.Tk):
         self.selected_map_art = tk.Label(map_preview, bg=BG)
         self.selected_map_art.pack(anchor="nw", pady=(4, 10))
         self.selected_map_caption = tk.Label(map_preview, bg=BG, fg=TEXT,
-                                             font=("Segoe UI", 16, "bold"),
+                                             font=(FONT_FAMILY, 16, "bold"),
                                              wraplength=255, justify="left")
         self.selected_map_caption.pack(anchor="nw")
         self.start_new_button = ttk.Button(map_preview, text="Start New Game",
@@ -279,7 +302,7 @@ class CheckpointApp(tk.Tk):
         list_frame = tk.Frame(info_content, bg=SURFACE, padx=14, pady=14)
         list_frame.pack(side="left", fill="both", expand=True, padx=(0, 14))
         tk.Label(list_frame, text="SAVED CHECKPOINTS", bg=SURFACE, fg=ACCENT,
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 9))
+                 font=(FONT_FAMILY, 10, "bold")).pack(anchor="w", pady=(0, 9))
         self.tree = ttk.Treeview(list_frame, show="tree", selectmode="extended",
                                  style="Checkpoint.Treeview")
         self.tree.column("#0", minwidth=320, width=490, stretch=True)
@@ -307,11 +330,11 @@ class CheckpointApp(tk.Tk):
         self.save_menu = tk.Menu(self, tearoff=False, bg=PANEL, fg=TEXT,
                                  activebackground="#454545", activeforeground=TEXT)
         self.save_menu.add_command(label="Start Game", command=self.start_selected_game)
-        self.save_menu.add_command(label="Rename Save Title", command=self.rename_save_title)
+        self.save_menu.add_command(label="Rename", command=self.rename_save_title)
         self.save_menu.add_command(label="Favorite", command=self.favorite)
-        self.save_menu.add_command(label="Export selected", command=self.export_selected)
+        self.save_menu.add_command(label="Export Save", command=self.export_selected)
         self.save_menu.add_separator()
-        self.save_menu.add_command(label="Delete selected", command=self.delete_save)
+        self.save_menu.add_command(label="Delete", command=self.delete_save)
 
         actions = ttk.Frame(outer)
         self.actions = actions
@@ -320,7 +343,7 @@ class CheckpointApp(tk.Tk):
         self.pause_button.pack(side="left")
         self.overwrite_button = tk.Button(actions, command=self.toggle_overwrite,
                                           bg=PANEL, activebackground="#383838",
-                                          font=("Segoe UI", 10, "bold"), padx=12, pady=7,
+                                          font=(FONT_FAMILY, 10, "bold"), padx=12, pady=7,
                                           bd=0, highlightthickness=0, cursor="hand2")
         self.overwrite_button.pack(side="left", padx=(8, 0))
         self._update_overwrite_button()
@@ -330,6 +353,14 @@ class CheckpointApp(tk.Tk):
         self.cancel_start_button = ttk.Button(actions, text="Cancel start", command=self.cancel_start,
                                                state="disabled")
         self.cancel_start_button.pack(side="left", padx=(8, 0))
+        self.install_button = ttk.Button(actions, text="Install Game Save mod",
+                                         command=self.install_mod)
+        self.install_button.pack(side="right")
+        self.display_box = ttk.Combobox(actions, textvariable=self.display_mode,
+                                        values=DISPLAY_MODES, state="readonly", width=11)
+        self.display_box.pack(side="right", padx=(0, 8))
+        self.display_box.bind("<<ComboboxSelected>>", self._select_display_mode)
+        ttk.Label(actions, text="Display").pack(side="right", padx=(0, 5))
         options = ttk.Frame(outer)
         options.pack(fill="x", pady=(0, 10))
         ttk.Label(options, text="FoV").pack(side="left", padx=(0, 4))
@@ -347,29 +378,27 @@ class CheckpointApp(tk.Tk):
             field.bind("<FocusOut>", self._commit_fov)
         self.fov_button = tk.Button(options, command=self.toggle_fov,
                                     bg=PANEL, activebackground="#383838",
-                                    font=("Segoe UI", 10, "bold"), padx=10, pady=7,
+                                    font=(FONT_FAMILY, 10, "bold"), padx=10, pady=7,
                                     bd=0, highlightthickness=0, cursor="hand2")
         self.fov_button.pack(side="left", padx=(6, 0))
         self._update_fov_button()
         self.speed_button = tk.Button(options, command=self.toggle_speed_fix,
                                       bg=PANEL, activebackground="#383838",
-                                      font=("Segoe UI", 10, "bold"), padx=10, pady=7,
+                                      font=(FONT_FAMILY, 10, "bold"), padx=10, pady=7,
                                       bd=0, highlightthickness=0, cursor="hand2")
         self.speed_button.pack(side="left", padx=(8, 0))
         self._update_speed_button()
-        self.install_button = ttk.Button(options, text="Install Game Save mod",
-                                         command=self.install_mod)
-        self.install_button.pack(side="right")
-        self.display_box = ttk.Combobox(options, textvariable=self.display_mode,
-                                        values=DISPLAY_MODES, state="readonly", width=11)
-        self.display_box.pack(side="right", padx=(0, 8))
-        self.display_box.bind("<<ComboboxSelected>>", self._select_display_mode)
-        ttk.Label(options, text="Display").pack(side="right", padx=(0, 5))
+        ttk.Button(options, text="Import saves", command=self.import_saves).pack(side="right")
+        ttk.Button(options, text="Export all", command=self.export_all).pack(
+            side="right", padx=(0, 6))
+        for label in ("Imported saves", "All saves"):
+            ttk.Radiobutton(options, text=label, value=label, variable=self.category,
+                            command=self.refresh).pack(side="right", padx=(0, 6))
 
         status_frame = tk.Frame(self, bg=SURFACE, padx=19, pady=11)
         status_frame.pack(fill="x")
         tk.Label(status_frame, textvariable=self.status, bg=SURFACE, fg=MUTED,
-                 font=("Segoe UI", 10), anchor="w", wraplength=1000,
+                 font=(FONT_FAMILY, 10), anchor="w", wraplength=1000,
                  justify="left").pack(fill="x")
 
     @staticmethod
@@ -403,7 +432,7 @@ class CheckpointApp(tk.Tk):
         self.library.data["save_policy"] = self.save_policy.get()
         self.library.write()
         self._update_overwrite_button()
-        self.status.set("New checkpoints will overwrite the started save." if
+        self.status.set("New checkpoints will overwrite the selected save." if
                         self.save_policy.get() == "Replace started save" else
                         "New checkpoints will be kept as separate saves.")
 
@@ -701,7 +730,7 @@ class CheckpointApp(tk.Tk):
         if self.background_image is not None:
             canvas.create_image(width // 2, -130, image=self.background_image, anchor="n")
         canvas.create_text(34, 36, text="MISSION SELECT", anchor="w", fill="#f7f3f2",
-                           font=("Arial Narrow", 27, "bold"))
+                           font=(FONT_FAMILY, 27, "bold"))
         saves = self.library.data["saves"]
         counts = {}
         for entry in saves.values():
@@ -715,7 +744,10 @@ class CheckpointApp(tk.Tk):
         self.gallery_maps = maps
         if self.gallery_selected_map not in maps:
             self.gallery_selected_map = maps[0] if maps else None
+            self.gallery_page_index = 0
+            self.gallery_selected_saves.clear()
         self.gallery_rows.clear()
+        self.gallery_save_rows.clear()
 
         left_x = 28
         left_width = min(435, int(width * 0.38))
@@ -723,7 +755,7 @@ class CheckpointApp(tk.Tk):
         row_height = min(38, max(18, (height - row_top - 8) // max(len(maps), 1)))
         if not maps:
             canvas.create_text(left_x + 12, row_top + 12, text="NO MAP SAVES FOUND",
-                               anchor="w", fill=TEXT, font=("Arial Narrow", 16, "bold"))
+                               anchor="w", fill=TEXT, font=(FONT_FAMILY, 16, "bold"))
         for index, map_name in enumerate(maps):
             y = row_top + index * row_height
             selected = map_name == self.gallery_selected_map
@@ -737,33 +769,35 @@ class CheckpointApp(tk.Tk):
             text = canvas.create_text(left_x + 18, y + (row_height - 2) // 2,
                                       text=title, anchor="w",
                                       fill="#0d0d0d" if selected else "#f1eeee",
-                                      font=("Arial Narrow", 14 if row_height < 30 else 17, "bold"),
+                                      font=(FONT_FAMILY, 14 if row_height < 30 else 17, "bold"),
                                       tags=(tag,))
             self.gallery_rows[map_name] = (rectangle, text)
             canvas.tag_bind(tag, "<Enter>", lambda _event, key=map_name:
-                            self._highlight_gallery_row(key, True))
+                            self._select_gallery_map(key))
             canvas.tag_bind(tag, "<Leave>", lambda _event, key=map_name:
                             self._highlight_gallery_row(key, False))
             canvas.tag_bind(tag, "<Button-1>", lambda _event, key=map_name:
                             self._select_gallery_map(key))
-            canvas.tag_bind(tag, "<Double-Button-1>", lambda _event, key=map_name:
-                            self.show_map(key))
 
         selected = self.gallery_selected_map
         if selected:
             right_x = left_x + left_width + 52
             right_width = width - right_x - 25
             center_x = right_x + right_width // 2
+            selected_save = self.selected_name()
+            selected_entry = saves.get(selected_save) if selected_save else None
+            if selected_entry and selected_entry.get("map") != selected:
+                selected_entry = None
             canvas.create_text(center_x, 91 if compact else 111,
                                text=map_title(selected).upper(),
-                               fill="#f7f3f2", font=("Arial Narrow", 22, "bold"))
+                               fill="#f7f3f2", font=(FONT_FAMILY, 22, "bold"))
             art_name = MAP_ART.get(selected, ("", None))[1]
             preview = None
             if art_name:
                 try:
                     key = f"preview:{art_name}"
                     if key not in self.map_images:
-                        path = core.ROOT / "ui textures" / "previews" / f"{art_name}.png"
+                        path = core.ROOT / "ui textures" / "png" / f"{art_name}.png"
                         self.map_images[key] = tk.PhotoImage(file=str(path))
                     preview = self.map_images[key]
                     if compact:
@@ -774,58 +808,130 @@ class CheckpointApp(tk.Tk):
                 except tk.TclError:
                     pass
             image_top = 112 if compact else 137
-            preview_width = preview.width() if preview is not None else (352 if compact else 440)
-            preview_height = preview.height() if preview is not None else (200 if compact else 250)
+            preview_width = preview.width() if preview is not None else (205 if compact else 256)
+            preview_height = preview.height() if preview is not None else (205 if compact else 256)
+            preview_center_x = (right_x + preview_width // 2 if selected_entry else center_x)
             if preview is not None:
-                image_id = canvas.create_image(center_x, image_top, image=preview,
+                image_id = canvas.create_image(preview_center_x, image_top, image=preview,
                                                anchor="n", tags=("gallery-preview",))
-                canvas.tag_bind(image_id, "<Button-1>",
-                                lambda _event, key=selected: self.show_map(key))
-                canvas.tag_bind(image_id, "<Enter>",
-                                lambda _event: canvas.configure(cursor="hand2"))
-                canvas.tag_bind(image_id, "<Leave>",
-                                lambda _event: canvas.configure(cursor=""))
             else:
-                canvas.create_rectangle(center_x - preview_width // 2, image_top,
-                                        center_x + preview_width // 2,
+                canvas.create_rectangle(preview_center_x - preview_width // 2, image_top,
+                                        preview_center_x + preview_width // 2,
                                         image_top + preview_height,
                                         fill="#21090a", outline="#673237")
-                canvas.create_text(center_x, image_top + preview_height // 2,
+                canvas.create_text(preview_center_x, image_top + preview_height // 2,
                                    text="MAP IMAGE UNAVAILABLE",
-                                   fill=MUTED, font=("Arial Narrow", 15, "bold"))
+                                   fill=MUTED, font=(FONT_FAMILY, 15, "bold"))
 
-            section_y = image_top + preview_height + (10 if compact else 13)
-            canvas.create_text(right_x, section_y, text="RECENT SAVES", anchor="w",
-                               fill=TEXT, font=("Arial Narrow", 15, "bold"))
-            count = counts.get(selected, 0)
-            count_id = canvas.create_text(
-                right_x + right_width, section_y,
-                text=f"{count} {'SAVE' if count == 1 else 'SAVES'} TOTAL  ·  VIEW ALL  →",
-                anchor="e", fill=TEXT, font=("Arial Narrow", 13, "bold"))
-            canvas.tag_bind(count_id, "<Button-1>",
-                            lambda _event, key=selected: self.show_map(key))
-            recent = recent_map_saves(saves, selected, self.category.get())
-            if not recent:
-                canvas.create_text(right_x, section_y + 42, text="No saved checkpoints for this map yet.",
-                                   anchor="w", fill=MUTED, font=("Segoe UI", 11))
-            for index, (name, entry) in enumerate(recent):
-                y = section_y + 22 + index * (46 if compact else 51)
+            if selected_entry:
+                stats_x = right_x + preview_width + 14
+                stats_width = right_x + right_width - stats_x - 4
+                canvas.create_rectangle(stats_x, image_top,
+                                        stats_x + stats_width, image_top + preview_height,
+                                        fill="#20090b", outline="#683036")
+                canvas.create_text(stats_x + 9, image_top + 9, text="PLAYER STATS",
+                                   anchor="nw", fill=TEXT, font=(FONT_FAMILY, 11, "bold"))
+                players = selected_entry.get("players") or []
+                if not players:
+                    canvas.create_text(stats_x + 9, image_top + 33,
+                                       text="Player stats unavailable for this save.",
+                                       anchor="nw", width=stats_width - 18, fill=MUTED,
+                                       font=(FONT_FAMILY, 9))
+                for player_index, player in enumerate(players[:4]):
+                    y = image_top + 31 + player_index * (40 if compact else 48)
+                    name = player.get("name") or f"Player {player_index + 1}"
+                    canvas.create_text(stats_x + 9, y, text=name, anchor="nw",
+                                       width=stats_width - 18, fill=TEXT,
+                                       font=(FONT_FAMILY, 9, "bold"))
+                    summary = (f"Pts {player.get('points', '—')}  K {player.get('kills', '—')}  "
+                               f"D {player.get('downs', '—')}  R {player.get('revives', '—')}")
+                    canvas.create_text(stats_x + 9, y + 13, text=summary, anchor="nw",
+                                       width=stats_width - 18, fill=MUTED,
+                                       font=(FONT_FAMILY, 8))
+                    weapons = player.get("weapons") or "—"
+                    canvas.create_text(stats_x + 9, y + 25, text=f"Weapons: {weapons}",
+                                       anchor="nw", width=stats_width - 18, fill=MUTED,
+                                       font=(FONT_FAMILY, 8))
+
+            button_y = image_top + preview_height + (3 if compact else 4)
+            button_height = 24 if compact else 28
+            button_width = min(165, (right_width - 18) // 2)
+            for offset, label, command, enabled in (
+                    (-1, "NEW GAME", self.start_new_game, True),
+                    (1, "CONTINUE", self.continue_latest_game, counts.get(selected, 0) > 0)):
+                x = center_x + offset * (button_width + 6) // 2
+                tag = f"gallery-action-{label.lower().replace(' ', '-')}"
+                canvas.create_rectangle(x - button_width // 2, button_y,
+                                        x + button_width // 2, button_y + button_height,
+                                        fill="#f5f4f1" if enabled else "#5b5555",
+                                        outline="", tags=(tag,))
+                canvas.create_text(x, button_y + button_height // 2, text=label,
+                                   fill="#0d0d0d" if enabled else "#b3aaaa",
+                                   font=(FONT_FAMILY, 11, "bold"), tags=(tag,))
+                if enabled:
+                    canvas.tag_bind(tag, "<Button-1>", lambda _event, action=command: action())
+
+            all_saves = recent_map_saves(saves, selected, self.category.get(),
+                                         limit=len(saves))
+            total_pages = max(1, (len(all_saves) + 2) // 3)
+            self.gallery_page_index = min(self.gallery_page_index, total_pages - 1)
+            page = all_saves[self.gallery_page_index * 3:(self.gallery_page_index + 1) * 3]
+            self.gallery_visible_saves = [name for name, _entry in page]
+            self.gallery_selected_saves.intersection_update(name for name, _entry in all_saves)
+            save_top = button_y + button_height + 6
+            save_step = 34 if compact else 38
+            save_height = 30 if compact else 34
+            if not page:
+                canvas.create_text(right_x, save_top + 18,
+                                   text="No saved checkpoints for this map yet.",
+                                   anchor="w", fill=MUTED, font=(FONT_FAMILY, 11))
+            for index, (name, entry) in enumerate(page):
+                y = save_top + index * save_step
                 tag = f"gallery-save-{index}"
-                canvas.create_rectangle(right_x, y, right_x + right_width,
-                                        y + (42 if compact else 47),
-                                        fill="#23090c", outline="#683036", tags=(tag,))
-                canvas.create_text(right_x + 13, y + (12 if compact else 14),
-                                   text=entry.get("title") or "Save Game", anchor="w",
-                                   fill=TEXT, font=("Segoe UI", 10, "bold"), tags=(tag,))
-                canvas.create_text(right_x + 13, y + (30 if compact else 34),
-                                   text=f"Round {entry.get('round', '?')}  ·  {save_date(entry.get('saved_at', ''))}",
-                                   anchor="w", fill=MUTED, font=("Segoe UI", 9), tags=(tag,))
+                active = name in self.gallery_selected_saves
+                rectangle = canvas.create_rectangle(
+                    right_x, y, right_x + right_width, y + save_height,
+                    fill="#f5f4f1" if active else "#23090c",
+                    outline="#f5f4f1" if active else "#683036", tags=(tag,))
+                title = canvas.create_text(
+                    right_x + 13, y + (9 if compact else 10),
+                    text=("★  " if entry.get("favorite") else "") +
+                         (entry.get("title") or "Save Game"), anchor="w",
+                    fill="#0d0d0d" if active else TEXT,
+                    font=(FONT_FAMILY, 9, "bold"), tags=(tag,))
+                subtitle = canvas.create_text(
+                    right_x + 13, y + (23 if compact else 26),
+                    text=f"Round {entry.get('round', '?')}  ·  {save_date(entry.get('saved_at', ''))}",
+                    anchor="w", fill="#252525" if active else MUTED,
+                    font=(FONT_FAMILY, 8), tags=(tag,))
+                self.gallery_save_rows[name] = (rectangle, title, subtitle)
                 canvas.tag_bind(tag, "<Button-1>",
-                                lambda _event, save_name=name: self._open_gallery_save(save_name))
+                                lambda event, save_name=name: self._select_gallery_save(save_name, event))
+                canvas.tag_bind(tag, "<Double-Button-1>",
+                                lambda _event, save_name=name: self._start_gallery_save(save_name))
+                canvas.tag_bind(tag, "<Button-3>",
+                                lambda event, save_name=name: self._show_gallery_menu(event, save_name))
                 canvas.tag_bind(tag, "<Enter>",
-                                lambda _event: canvas.configure(cursor="hand2"))
+                                lambda _event, save_name=name: self._highlight_gallery_save(save_name, True))
                 canvas.tag_bind(tag, "<Leave>",
-                                lambda _event: canvas.configure(cursor=""))
+                                lambda _event, save_name=name: self._highlight_gallery_save(save_name, False))
+            pager_y = save_top + 3 * save_step + (5 if compact else 7)
+            canvas.create_text(center_x - 34, pager_y, text="‹", fill=TEXT,
+                               font=(FONT_FAMILY, 17), tags=("gallery-page-previous",))
+            canvas.create_text(center_x, pager_y,
+                               text=f"{self.gallery_page_index + 1}/{total_pages}", fill=TEXT,
+                               font=(FONT_FAMILY, 11))
+            canvas.create_text(center_x + 34, pager_y, text="›", fill=TEXT,
+                               font=(FONT_FAMILY, 17), tags=("gallery-page-next",))
+            canvas.create_text(center_x + 66, pager_y,
+                               text=f"{len(all_saves)} {'SAVE' if len(all_saves) == 1 else 'SAVES'} TOTAL",
+                               anchor="w", fill=TEXT, font=(FONT_FAMILY, 10))
+            if self.gallery_page_index > 0:
+                canvas.tag_bind("gallery-page-previous", "<Button-1>",
+                                lambda _event: self._change_gallery_page(-1))
+            if self.gallery_page_index + 1 < total_pages:
+                canvas.tag_bind("gallery-page-next", "<Button-1>",
+                                lambda _event: self._change_gallery_page(1))
 
     def _highlight_gallery_row(self, map_name: str, highlighted: bool):
         row = self.gallery_rows.get(map_name)
@@ -838,56 +944,97 @@ class CheckpointApp(tk.Tk):
         self.gallery_canvas.configure(cursor="hand2" if highlighted else "")
 
     def _select_gallery_map(self, map_name: str):
+        if map_name == self.gallery_selected_map:
+            return
         self.gallery_selected_map = map_name
+        self.gallery_page_index = 0
+        self.gallery_selected_saves.clear()
+        self.gallery_anchor_save = None
         self._render_gallery()
 
-    def _open_gallery_save(self, name: str):
-        entry = self.library.data["saves"].get(name)
-        if not entry:
+    def _change_gallery_page(self, direction: int):
+        self.gallery_page_index += direction
+        self._render_gallery()
+
+    def _highlight_gallery_save(self, name: str, highlighted: bool):
+        row = self.gallery_save_rows.get(name)
+        if not row:
             return
-        self.show_map(entry["map"])
-        if self.tree.exists(name):
-            self.tree.selection_set(name)
-            self.tree.focus(name)
-            self.tree.see(name)
-            self._render_details()
+        active = highlighted or name in self.gallery_selected_saves
+        self.gallery_canvas.itemconfigure(row[0],
+                                          fill="#f5f4f1" if active else "#23090c",
+                                          outline="#f5f4f1" if active else "#683036")
+        self.gallery_canvas.itemconfigure(row[1], fill="#0d0d0d" if active else TEXT)
+        self.gallery_canvas.itemconfigure(row[2], fill="#252525" if active else MUTED)
+        self.gallery_canvas.configure(cursor="hand2" if highlighted else "")
+
+    def _select_gallery_save(self, name: str, event=None):
+        if name not in self.gallery_visible_saves:
+            return
+        state = getattr(event, "state", 0)
+        if state & 0x1 and self.gallery_anchor_save in self.gallery_visible_saves:
+            first = self.gallery_visible_saves.index(self.gallery_anchor_save)
+            last = self.gallery_visible_saves.index(name)
+            self.gallery_selected_saves.update(
+                self.gallery_visible_saves[min(first, last):max(first, last) + 1])
+        elif state & 0x4:
+            if name in self.gallery_selected_saves:
+                self.gallery_selected_saves.remove(name)
+            else:
+                self.gallery_selected_saves.add(name)
+            self.gallery_anchor_save = name
+        else:
+            self.gallery_selected_saves = {name}
+            self.gallery_anchor_save = name
+        self._render_gallery()
+
+    def _start_gallery_save(self, name: str):
+        self.gallery_selected_saves = {name}
+        self.gallery_anchor_save = name
+        self._render_gallery()
+        self.start_selected_game()
+
+    def _show_gallery_menu(self, event, name: str):
+        if name not in self.gallery_selected_saves:
+            self.gallery_selected_saves = {name}
+            self.gallery_anchor_save = name
+            self._render_gallery()
+        self._configure_save_menu(name)
+        try:
+            self.save_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.save_menu.grab_release()
+
+    def continue_latest_game(self):
+        saves = recent_map_saves(self.library.data["saves"], self.gallery_selected_map,
+                                 self.category.get(), limit=1)
+        if not saves:
+            return
+        self._start_gallery_save(saves[0][0])
 
     def show_map(self, map_name: str):
-        self.gallery_selected_map = map_name
-        self.current_map = map_name
-        if not self.heading.winfo_manager():
-            self.heading.pack(fill="x", before=self.outer)
-        self.heading_title.configure(text="SAVED CHECKPOINTS")
-        self.map_heading.configure(text=map_title(map_name))
-        self.selected_map_caption.configure(text=map_title(map_name))
-        art_name = MAP_ART.get(map_name, ("", None))[1]
-        if art_name:
-            try:
-                key = f"full:{art_name}"
-                if key not in self.map_images:
-                    path = core.ROOT / "ui textures" / "png" / f"{art_name}.png"
-                    self.map_images[key] = tk.PhotoImage(file=str(path))
-                self.selected_map_art.configure(image=self.map_images[key])
-            except tk.TclError:
-                self.selected_map_art.configure(image="")
-        else:
-            self.selected_map_art.configure(image="")
-        self.gallery_page.pack_forget()
-        self.saves_page.pack(fill="both", expand=True, before=self.actions)
+        self._select_gallery_map(map_name)
+        self.current_map = None
         self.refresh()
 
     def show_gallery(self):
         self.current_map = None
-        self.heading_title.configure(text="MISSION SELECT")
         self.heading.pack_forget()
         self.saves_page.pack_forget()
-        self.gallery_page.pack(fill="both", expand=True, before=self.actions)
+        if not self.gallery_page.winfo_manager():
+            self.gallery_page.pack(fill="both", expand=True, before=self.actions)
         self.refresh()
 
     def start_new_game(self):
-        if self.busy or not self.current_map:
+        if self.busy or not self.gallery_selected_map:
             return
-        map_name = self.current_map
+        map_name = self.gallery_selected_map
+        # A new session has no existing checkpoint to replace, even if the
+        # player had selected a save while browsing this map.
+        self.gallery_selected_saves.clear()
+        self.gallery_anchor_save = None
+        self.started_save_name = None
+        self._render_gallery()
         self.current_session_options = None
         self.start_cancel = threading.Event()
         self.cancel_start_button.configure(state="normal")
@@ -916,7 +1063,7 @@ class CheckpointApp(tk.Tk):
         names = self.selected_names()
         if len(names) > 1:
             tk.Label(self.details, text=f"{len(names)} saves selected", bg=SURFACE, fg=TEXT,
-                     font=("Segoe UI", 16, "bold")).pack(anchor="w")
+                     font=(FONT_FAMILY, 16, "bold")).pack(anchor="w")
             tk.Label(self.details, text="Use Export selected or Delete selected. Hold Shift to select a range, or Ctrl to select individual saves.",
                      bg=SURFACE, fg=MUTED, wraplength=245, justify="left").pack(anchor="w", pady=(8, 0))
             return
@@ -930,18 +1077,18 @@ class CheckpointApp(tk.Tk):
                        self.library.profiles()[0])
         title = entry.get("title") or "Save Game"
         tk.Label(self.details, text=title, bg=SURFACE, fg=TEXT,
-                 font=("Segoe UI", 19, "bold")).pack(anchor="w")
+                 font=(FONT_FAMILY, 19, "bold")).pack(anchor="w")
         tk.Label(self.details, text=save_date(entry.get("saved_at", ""), long=True),
-                 bg=SURFACE, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 11))
+                 bg=SURFACE, fg=MUTED, font=(FONT_FAMILY, 10)).pack(anchor="w", pady=(0, 11))
         count = entry.get("player_count") or len(entry.get("players", []))
         mode = entry.get("saved_mode") or profile["mode"]
         description = "Solo · 1 player" if mode == "Solo" else (f"{count} players" if count else mode)
         for line in (f"Round {entry.get('round', '?')}", description, profile["title"]):
-            tk.Label(self.details, text=line, bg=SURFACE, fg=MUTED, font=("Segoe UI", 10),
+            tk.Label(self.details, text=line, bg=SURFACE, fg=MUTED, font=(FONT_FAMILY, 10),
                      wraplength=245, justify="left").pack(anchor="w", pady=(0, 4))
         tk.Frame(self.details, bg=BORDER, height=1).pack(fill="x", pady=(11, 12))
         tk.Label(self.details, text="PLAYER STATS", bg=SURFACE, fg=ACCENT,
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
+                 font=(FONT_FAMILY, 10, "bold")).pack(anchor="w", pady=(0, 8))
         players = entry.get("players") or []
         if not players:
             tk.Label(self.details, text="Player stats have not been recorded for this save.",
@@ -955,25 +1102,31 @@ class CheckpointApp(tk.Tk):
                     player_name.casefold().startswith("unknown soldier")):
                 player_name = steam_identity.local_persona_name(core.GAME) or player_name
             tk.Label(player_frame, text=player_name, bg=PANEL,
-                     fg=TEXT, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+                     fg=TEXT, font=(FONT_FAMILY, 10, "bold")).pack(anchor="w")
             def value(key):
                 result = player.get(key)
                 return str(result) if result not in (None, "") else "—"
             tk.Label(player_frame, text=f"Points {value('points')}   Kills {value('kills')}   Downs {value('downs')}   Revives {value('revives')}",
-                     bg=PANEL, fg=MUTED, font=("Segoe UI", 9), wraplength=245,
+                     bg=PANEL, fg=MUTED, font=(FONT_FAMILY, 9), wraplength=245,
                      justify="left").pack(anchor="w", pady=(3, 0))
             tk.Label(player_frame, text=f"Weapons / loadout: {value('weapons')}",
-                     bg=PANEL, fg=MUTED, font=("Segoe UI", 9), wraplength=245,
+                     bg=PANEL, fg=MUTED, font=(FONT_FAMILY, 9), wraplength=245,
                      justify="left").pack(anchor="w", pady=(2, 0))
         ttk.Button(self.details, text="Start Game", command=self.start_selected_game).pack(
             anchor="w", pady=(9, 0))
 
     def selected_name(self) -> str | None:
         selection = self.selected_names()
+        if not self.saves_page.winfo_manager():
+            return self.gallery_anchor_save if self.gallery_anchor_save in selection else (
+                selection[0] if selection else None)
         focused = self.tree.focus()
         return focused if focused in selection else (selection[0] if selection else None)
 
     def selected_names(self) -> list[str]:
+        if not self.saves_page.winfo_manager():
+            return [name for name in self.gallery_selected_saves
+                    if name in self.library.data["saves"]]
         selected = set(self.tree.selection())
         return [name for name in self.tree.get_children() if name in selected]
 
@@ -1046,17 +1199,20 @@ class CheckpointApp(tk.Tk):
         if row not in self.tree.selection():
             self.tree.selection_set(row)
         self.tree.focus(row)
-        entry = self.library.data["saves"][row]
+        self._configure_save_menu(row)
+        try:
+            self.save_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.save_menu.grab_release()
+
+    def _configure_save_menu(self, name: str):
+        entry = self.library.data["saves"][name]
         multiple = len(self.selected_names()) > 1
         for index in (0, 1, 2):
             self.save_menu.entryconfigure(index, state="disabled" if multiple else "normal")
         self.save_menu.entryconfigure(2, label="Remove Favorite" if entry["favorite"] else "Favorite")
         self.save_menu.entryconfigure(3, label=f"Export {len(self.selected_names())} selected" if multiple else "Export Save")
         self.save_menu.entryconfigure(5, label=f"Delete {len(self.selected_names())} selected" if multiple else "Delete")
-        try:
-            self.save_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self.save_menu.grab_release()
 
     def rename_save_title(self):
         if self.busy:
@@ -1339,14 +1495,17 @@ class CheckpointApp(tk.Tk):
                 if kind == "saved":
                     _, path, save_kind, profile_id, title = event
                     try:
-                        if (self.started_save_name and
+                        overwrite_target = self.selected_name() or self.started_save_name
+                        overwrite_error = None
+                        if (overwrite_target and
                                 self.save_policy.get() == "Replace started save"):
                             try:
-                                details = self.library.replace_save(path, self.started_save_name)
-                            except (FileNotFoundError, ValueError):
-                                self.started_save_name = None
+                                details = self.library.replace_save(path, overwrite_target)
+                                self.started_save_name = overwrite_target
+                            except (FileNotFoundError, ValueError) as error:
                                 details = self.library.register(path, kind=save_kind,
                                                                 profile_id=profile_id, title=title)
+                                overwrite_error = str(error)
                         else:
                             details = self.library.register(path, kind=save_kind,
                                                             profile_id=profile_id, title=title)
@@ -1354,7 +1513,14 @@ class CheckpointApp(tk.Tk):
                             self.skip_initial_round = None
                         self.refresh()
                         when = datetime.fromisoformat(details["saved_at"]).strftime("%I:%M %p")
-                        self.status.set(f"Saved {details['map']} at {when}.")
+                        if overwrite_error:
+                            self.status.set(f"Could not overwrite {overwrite_target}: {overwrite_error}. "
+                                            "The checkpoint was kept as a new save.")
+                        elif self.save_policy.get() != "Replace started save" or overwrite_target:
+                            self.status.set(f"Saved {details['map']} at {when}.")
+                        else:
+                            self.status.set("No save was selected to overwrite; "
+                                            f"kept a new {details['map']} checkpoint at {when}.")
                     except Exception as error:
                         messagebox.showerror("Save catalog error", str(error), parent=self)
                 elif kind == "watch_error":

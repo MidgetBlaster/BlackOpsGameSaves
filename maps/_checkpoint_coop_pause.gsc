@@ -11,6 +11,30 @@ init()
 	level.checkpoint_back_speed_default = GetDvar( "player_backSpeedScale" );
 	level.checkpoint_strafe_speed_default = GetDvar( "player_strafeSpeedScale" );
 	level thread watch_player_options();
+	level thread watch_power_state();
+	level thread restore_power_state();
+}
+
+watch_power_state()
+{
+	level endon( "end_game" );
+	if( !flag( "power_on" ) )
+		flag_wait( "power_on" );
+	// Build the marker only after the flag is set. The companion finds this
+	// saved level value in the checkpoint payload when archiving the game.
+	level.checkpoint_power_marker = "BOGS_" + "POWER_ON" + "_V1";
+	SetDvar( "checkpoint_power_state", "1" );
+}
+
+restore_power_state()
+{
+	level endon( "end_game" );
+	for( ;; )
+	{
+		if( GetDvarInt( "checkpoint_restore_power_on" ) != 0 && !flag( "power_on" ) )
+			flag_set( "power_on" );
+		wait 0.1;
+	}
 }
 
 // The manager sends a restore request only after loadgame_continue has finished.

@@ -52,7 +52,8 @@ def main():
                         help="Folder for built executables (default: release)")
     RELEASE = parser.parse_args().output.resolve()
     RELEASE.mkdir(exist_ok=True)
-    build("BlackOpsGameSaves", "checkpoint_gui.py", [(ICON, ".")])
+    build("BlackOpsGameSaves", "checkpoint_gui.py", [(ICON, "."),
+                                                    (ROOT / "ui fonts", "ui fonts")])
     payload = payload_zip()
     build("InstallBlackOpsGameSaves", "install_blackops_game_saves.py",
           [(payload, "."), (RELEASE / "BlackOpsGameSaves.exe", "."), (ICON, ".")])

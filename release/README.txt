@@ -10,14 +10,20 @@ Black Ops Game Saves — Windows installer
 This one installer carries the Game Save mod, loader, map thumbnails, save
 manager, and icon. You can send only this installer EXE to another user. It does
 not contain personal checkpoints. The manager's map selection screen uses the
-Zombies lobby background and shows each selected map's three newest saves and
-total save count. Use Export selected or Export all to make a .bo1gamesave file, copy that
-file to another computer, and choose Import saves there.
+Zombies lobby background and the full square map artwork. Hover a map to
+select it. New Game starts that map; Continue opens its newest checkpoint.
+Three saves appear per page, with a pager and total count. Right-click a save
+for Start Game, Rename, Favorite, Export Save, or Delete. Export all and Import
+saves are in the bottom controls. The requested condensed Helvetica font is
+included with the manager and loaded privately when it runs.
 The Backspeed/strafe fix toggle beside FoV is remembered across launches.
 New checkpoints can restore the held weapon after Continue with the bundled
 checkpoint reader. Older checkpoints retain their matching scripts.
 Hold Shift or Ctrl in a map's save list to select several saves before
-using Export selected or Delete selected.
+using Export Save or Delete. Overwrite Game Saves updates the currently
+selected checkpoint. Automatic saves resume at the chosen round boundary
+after an in-game Continue. New checkpoints record the map's power-on state
+for restoration during Continue; older checkpoints keep their original script.
 
 The game executable must match the tested Black Ops code and memory layout.
 The installer checks this before copying files and displays the selected

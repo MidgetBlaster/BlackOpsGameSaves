@@ -1,9 +1,11 @@
 import tempfile
 import base64
 import hashlib
+import json
 from contextlib import contextmanager
 from pathlib import Path
 import struct
+import zipfile
 from unittest.mock import patch
 import checkpoint_memory as c
 
@@ -120,6 +122,29 @@ with tempfile.TemporaryDirectory(dir=c.ROOT) as directory:
     c.ARCHIVE = Path(directory)
     c.RECOVERY_FILE = c.ARCHIVE / 'recovery' / 'latest.bo1checkpoint'
     path = c.snapshot(game, 7)
+    address, image, header = c.committed(game)
+    assert c.archived_round_for_header(header["map"], header["save_id"], image) == 7
+    assert c.archived_round_for_header(header["map"], header["save_id"], b"different") == 7
+    alternate = c.ARCHIVE / "same-id-different-round.bo1checkpoint"
+    with zipfile.ZipFile(path) as original:
+        alternate_manifest = json.loads(original.read("manifest.json"))
+        alternate_image = bytearray(original.read("save.bin"))
+    alternate_manifest["round"] = 8
+    alternate_image[100] ^= 1
+    alternate_manifest["sha256"]["save.bin"] = hashlib.sha256(alternate_image).hexdigest()
+    with zipfile.ZipFile(alternate, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(alternate_manifest))
+        archive.writestr("save.bin", alternate_image)
+    relocated_image = bytearray(image)
+    struct.pack_into("<I", relocated_image, 0, c.BUFFERS[c.SAVE_B][0])
+    struct.pack_into("<I", relocated_image, c.MEMFILE_SIZE, c.BUFFERS[c.SAVE_B][1])
+    assert c.archived_round_for_header(header["map"], header["save_id"],
+                                       relocated_image) == 7
+    assert c.archived_round_for_header(header["map"], header["save_id"],
+                                       alternate_image) == 8
+    assert c.archived_round_for_header(header["map"], header["save_id"],
+                                       b"different") is None
+    alternate.unlink()
     metadata, data = c.load_archive(path)
     assert metadata['round'] == 7
     assert data['state.bin'][:4] == b'SAVE'
@@ -147,6 +172,10 @@ with tempfile.TemporaryDirectory(dir=c.ROOT) as directory:
     else:
         raise AssertionError('Mismatched map was accepted')
     assert game.read(c.BUFFERS[c.SAVE_A][0], 4) == before
+    powered_game = FakeGame()
+    powered_game.write(c.BUFFERS[c.SAVE_A][0] + 128, c.POWER_MARKER)
+    powered_path = c.snapshot(powered_game, 4, target=Path(directory) / "powered.bo1checkpoint")
+    assert c.load_archive(powered_path)[0]["power_on"] is True
 tracker = c.RoundTracker(start_round=12)
 assert tracker.update(5, 0, 200, 2000, 0) is None
 assert tracker.update(5, 0, 200, 2000, 6) is None

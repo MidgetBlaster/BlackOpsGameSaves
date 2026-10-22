@@ -1,4 +1,23 @@
-# Black Ops Game Saves v1.0.13
+# Black Ops Game Saves v1.0.14
+
+- Shows the complete square map thumbnail in Mission Select instead of the
+  cropped wide preview. The image fits at both normal and minimum window sizes.
+- Keeps maps and saves on one screen. Hovering a map selects it; the right side
+  has New Game, Continue, three saves per page, a pager, and the total count.
+  Hovered saves turn white with black text, and their context menu retains
+  Start Game, Rename, Favorite, Export, and Delete.
+- Moves save filters, export, and import to the bottom controls. Bundles the
+  supplied Helvetica Neue LT Pro 67 Medium Condensed font for the manager.
+- Rearms round tracking after an in-game Continue. End of Rounds now follows
+  the round-end signal; the other timing choices follow the transition and
+  new-round boundaries. Restored checkpoints match their archived round even
+  when Black Ops moves them to its other save buffer. Overwrite Game Saves
+  targets the selected save.
+- Adds a script variant for new checkpoints that records the power-on state
+  and requests the power flag during Continue. Older saves retain their
+  original script variant for compatibility.
+
+## v1.0.13
 
 - Fits the entire map selection and three recent saves in the window without
   scrolling, including at the minimum window size.

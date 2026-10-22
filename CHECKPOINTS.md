@@ -59,15 +59,13 @@ when missing or different, backing up any replaced files under
 `Game Save` installation are kept. Later, open the manager with
 `mods/Game Save/Open Game Save.cmd`.
 
-- The first screen stretches the Zombies lobby frame vertically. Mission Select
-  sits in its top band; map titles
-  appear in rows on the left; the selected row turns white with black text.
-  The map preview appears on the right, with its three most recent saves and
-  total save count below it. Click the preview or the total count to see every save
-  for that map by title, round, player mode
-  or count, and date and time. The map artwork remains on the left and the
-  selected save's details appear on the right. Turn the mouse wheel over the
-  maps or save list to scroll; neither list shows a scrollbar.
+- Mission Select fits the map rows and saved checkpoints on one screen. Hover
+  over a map name to select it; the row turns white with black text. The full
+  square thumbnail appears on the right, followed by New Game, Continue, and
+  three saves per page. Use the arrows below the saves to change pages. The
+  pager also shows the map's total save count. Hovering a save highlights it;
+  selecting one shows its player details beside the thumbnail. All saves,
+  Imported saves, Export all, and Import saves sit with the bottom controls.
 - The player panel shows points, weapons or loadout, revives, downs, and
   kills for each player. The manager reads these from checkpoints with its
   built-in LZO decoder. The host's Steam name is used in the
@@ -90,22 +88,24 @@ when missing or different, backing up any replaced files under
   F11. It does not make a rolling recovery checkpoint. An existing recovery
   file from an older session can still be imported when the window opens.
 - The **Overwrite Game Saves** button beside **Pause co-op** shows a green check
-  when new round or F11 checkpoints replace the save you started. A red X
+  when new round or F11 checkpoints replace the save currently selected in
+  Mission Select. A red X
   means those checkpoints are kept as separate saves. Its setting is saved
   between manager sessions.
 - **Auto Save Settings** cycles through End of Rounds, Round Transitions, and
   Start of Round. The watcher reads the Zombies round-end flag and round counter
   for these timings. The setting is remembered between manager sessions.
-- **Start New Game** below the selected map artwork starts that map without
+- **New Game** below the selected map artwork starts that map without
   continuing a saved checkpoint. Automatic saves begin at the chosen round timing.
+- **Continue** loads the newest checkpoint for the selected map by save time.
 - New checkpoints on a map receive titles Save Game 1, Save Game 2, and so on.
   Renamed titles remain unchanged, including when Overwrite Game Saves is on.
-- Select a checkpoint to see its details. Hold **Shift** to select a range or
-  **Ctrl** to select individual saves. **Export selected** puts all selected
-  saves in one portable package; **Delete selected** removes them after one
-  confirmation. **Favorites** filters the list.
-- Right-click a save for **Start Game**, **Rename Save Title**, **Favorite**,
-  and **Delete**. Start Game runs `launcher_ldr.exe game_mod.dll ../BlackOps.exe`
+- Select a checkpoint to see its details. Hold **Shift** to select a range on
+  the current page or **Ctrl** to select individual saves across pages. The
+  context menu's Export Save puts selected saves in one portable package;
+  Delete removes them after confirmation.
+- Right-click a save for **Start Game**, **Rename**, **Favorite**,
+  **Export Save**, and **Delete**. Start Game runs `launcher_ldr.exe game_mod.dll ../BlackOps.exe`
   from the game's `bin` folder, passes the `Game Save` mod, checkpoint binds,
   and selected map, then waits for the map's save system during its opening
   screen. If Black Ops is already running, it
@@ -125,6 +125,9 @@ when missing or different, backing up any replaced files under
   archived again; saving resumes on the next round or player F11. You can cancel
   while it is preparing. A game launched before the new F10 binding was added
   needs one restart through the manager to install that binding.
+- New checkpoints include a power-on marker in the saved script state. During
+  Continue, the manager requests `power_on` as the saved map resumes. Existing
+  checkpoints keep their matching old scripts and cannot use the new marker.
 - For **Co-op**, Start Game loads the map and shows a prompt. Let the same
   players rejoin before choosing OK. The manager then
   makes a fresh checkpoint with those players, restores the chosen save, and
