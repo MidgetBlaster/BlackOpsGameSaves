@@ -16,6 +16,7 @@ import zipfile
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import checkpoint_memory as core
+from background_scaler import resized_ppm
 import display_mode
 import fov_keeper
 import game_launcher
@@ -33,6 +34,8 @@ MUTED = "#c3aaaa"
 ACCENT = "#e9dddd"
 # The supplied font's internal Windows family name differs from its file name.
 FONT_FAMILY = "HelveticaNeueLT Pro 67 MdCn"
+BODY_FONT = "Segoe UI"
+DISPLAY_FONT = "Arial Narrow"
 FONT_FILE = Path("ui fonts") / "Helvetica Neue LT Pro 67 Medium Condensed.otf"
 
 
@@ -154,6 +157,8 @@ class CheckpointApp(tk.Tk):
         self.gallery_anchor_save = None
         self.gallery_save_rows = {}
         self.gallery_visible_saves = []
+        self.background_size = None
+        self.background_resize_job = None
         self.busy = False
         self.closing = False
         self.launch_after_close = None
@@ -193,45 +198,42 @@ class CheckpointApp(tk.Tk):
                                         else core.SAVE_TIMINGS[0])
         self.configure(background=BG)
         try:
-            background_path = (core.ROOT / "ui textures" / "png" /
-                               "menu_zombie_lobby_frame_outer_ingame_background.png")
-            self.background_image = tk.PhotoImage(file=str(background_path))
-            self.background_label = tk.Label(self, image=self.background_image,
-                                             bg=BG, bd=0, highlightthickness=0)
-            self.background_label.place(relx=0, rely=0, relwidth=1, relheight=1)
-            self.background_label.lower()
-        except tk.TclError:
+            self.background_path = (core.ROOT / "ui textures" / "png" /
+                                    "menu_zombie_lobby_frame_outer_ingame_background.png")
+            self.background_image = None
+        except OSError:
+            self.background_path = None
             self.background_image = None
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("TFrame", background=BG)
-        style.configure("TLabel", background=BG, foreground=TEXT, font=(FONT_FAMILY, 10))
-        style.configure("TButton", padding=(10, 7), font=(FONT_FAMILY, 10),
+        style.configure("TLabel", background=BG, foreground=TEXT, font=(BODY_FONT, 10))
+        style.configure("TButton", padding=(10, 7), font=(BODY_FONT, 10),
                         background=PANEL, foreground=TEXT, bordercolor=BORDER)
         style.map("TButton", background=[("active", "#383838"), ("disabled", SURFACE)],
                   foreground=[("disabled", "#697c96")])
         style.configure("TEntry", fieldbackground=SURFACE, foreground=TEXT,
-                        bordercolor=BORDER, font=(FONT_FAMILY, 10))
+                        bordercolor=BORDER, font=(BODY_FONT, 10))
         style.configure("TCombobox", fieldbackground=SURFACE, background=PANEL,
                         foreground=TEXT, arrowcolor=TEXT, bordercolor=BORDER,
-                        font=(FONT_FAMILY, 10))
+                        font=(BODY_FONT, 10))
         style.map("TCombobox", fieldbackground=[("readonly", SURFACE)],
                   foreground=[("readonly", TEXT)])
         style.configure("TCheckbutton", background=BG, foreground=TEXT,
-                        font=(FONT_FAMILY, 10))
+                        font=(BODY_FONT, 10))
         style.configure("TRadiobutton", background=BG, foreground=TEXT,
-                        font=(FONT_FAMILY, 10))
+                        font=(BODY_FONT, 10))
         style.configure("Vertical.TScrollbar", background=PANEL, troughcolor=BG,
                         bordercolor=BG, arrowcolor=TEXT)
-        style.configure("Treeview", rowheight=43, font=(FONT_FAMILY, 10),
+        style.configure("Treeview", rowheight=43, font=(BODY_FONT, 10),
                         background=SURFACE, fieldbackground=SURFACE, foreground=TEXT,
                         bordercolor=BORDER)
         style.map("Treeview", background=[("selected", "#454545")],
                   foreground=[("selected", "#ffffff")])
         style.configure("Treeview.Heading", background=PANEL, foreground=TEXT,
-                        font=(FONT_FAMILY, 10, "bold"))
+                        font=(BODY_FONT, 10, "bold"))
         style.layout("Checkpoint.Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
-        style.configure("Checkpoint.Treeview", rowheight=52, font=(FONT_FAMILY, 10),
+        style.configure("Checkpoint.Treeview", rowheight=52, font=(BODY_FONT, 10),
                         background=SURFACE, fieldbackground=SURFACE, foreground=TEXT,
                         borderwidth=0, relief="flat")
         style.map("Checkpoint.Treeview", background=[("selected", "#383838")],
@@ -250,9 +252,9 @@ class CheckpointApp(tk.Tk):
         self.heading = heading
         heading.pack(fill="x")
         tk.Label(heading, text="GAME SAVE  ·  BLACK OPS ZOMBIES", bg=SURFACE, fg=ACCENT,
-                 font=(FONT_FAMILY, 9, "bold")).pack(anchor="w")
+                 font=(BODY_FONT, 9, "bold")).pack(anchor="w")
         self.heading_title = tk.Label(heading, text="MISSION SELECT", bg=SURFACE, fg=TEXT,
-                                      font=(FONT_FAMILY, 26, "bold"))
+                                      font=(DISPLAY_FONT, 26, "bold"))
         self.heading_title.pack(anchor="w")
         outer = ttk.Frame(self, padding=10)
         self.outer = outer
@@ -261,14 +263,17 @@ class CheckpointApp(tk.Tk):
         self.gallery_page.pack(fill="both", expand=True)
         self.gallery_canvas = tk.Canvas(self.gallery_page, bg=BG, highlightthickness=0, bd=0)
         self.gallery_canvas.pack(fill="both", expand=True)
-        self.gallery_canvas.bind("<Configure>", lambda _event: self._render_gallery())
+        self.gallery_canvas.bind("<Configure>", self._gallery_configured)
+        self.gallery_canvas.bind("<MouseWheel>", self._gallery_mouse_wheel)
+        self.gallery_canvas.bind("<Button-4>", lambda event: self._gallery_mouse_wheel(event, -1))
+        self.gallery_canvas.bind("<Button-5>", lambda event: self._gallery_mouse_wheel(event, 1))
         self.heading.pack_forget()  # Mission Select is drawn on the lobby artwork.
 
         self.saves_page = ttk.Frame(outer)
         top = ttk.Frame(self.saves_page)
         top.pack(fill="x", pady=(0, 10))
         ttk.Button(top, text="← Maps", command=self.show_gallery).pack(side="left", padx=(0, 16))
-        self.map_heading = ttk.Label(top, text="", font=(FONT_FAMILY, 17, "bold"))
+        self.map_heading = ttk.Label(top, text="", font=(FONT_FAMILY, 17))
         self.map_heading.pack(side="left")
         ttk.Button(top, text="Import saves", command=self.import_saves).pack(side="right")
         ttk.Button(top, text="Delete selected", command=self.delete_save).pack(side="right")
@@ -291,7 +296,7 @@ class CheckpointApp(tk.Tk):
         self.selected_map_art = tk.Label(map_preview, bg=BG)
         self.selected_map_art.pack(anchor="nw", pady=(4, 10))
         self.selected_map_caption = tk.Label(map_preview, bg=BG, fg=TEXT,
-                                             font=(FONT_FAMILY, 16, "bold"),
+                                             font=(FONT_FAMILY, 16),
                                              wraplength=255, justify="left")
         self.selected_map_caption.pack(anchor="nw")
         self.start_new_button = ttk.Button(map_preview, text="Start New Game",
@@ -302,7 +307,7 @@ class CheckpointApp(tk.Tk):
         list_frame = tk.Frame(info_content, bg=SURFACE, padx=14, pady=14)
         list_frame.pack(side="left", fill="both", expand=True, padx=(0, 14))
         tk.Label(list_frame, text="SAVED CHECKPOINTS", bg=SURFACE, fg=ACCENT,
-                 font=(FONT_FAMILY, 10, "bold")).pack(anchor="w", pady=(0, 9))
+                 font=(BODY_FONT, 10, "bold")).pack(anchor="w", pady=(0, 9))
         self.tree = ttk.Treeview(list_frame, show="tree", selectmode="extended",
                                  style="Checkpoint.Treeview")
         self.tree.column("#0", minwidth=320, width=490, stretch=True)
@@ -343,7 +348,7 @@ class CheckpointApp(tk.Tk):
         self.pause_button.pack(side="left")
         self.overwrite_button = tk.Button(actions, command=self.toggle_overwrite,
                                           bg=PANEL, activebackground="#383838",
-                                          font=(FONT_FAMILY, 10, "bold"), padx=12, pady=7,
+                                          font=(BODY_FONT, 10, "bold"), padx=12, pady=7,
                                           bd=0, highlightthickness=0, cursor="hand2")
         self.overwrite_button.pack(side="left", padx=(8, 0))
         self._update_overwrite_button()
@@ -378,13 +383,13 @@ class CheckpointApp(tk.Tk):
             field.bind("<FocusOut>", self._commit_fov)
         self.fov_button = tk.Button(options, command=self.toggle_fov,
                                     bg=PANEL, activebackground="#383838",
-                                    font=(FONT_FAMILY, 10, "bold"), padx=10, pady=7,
+                                    font=(BODY_FONT, 10, "bold"), padx=10, pady=7,
                                     bd=0, highlightthickness=0, cursor="hand2")
         self.fov_button.pack(side="left", padx=(6, 0))
         self._update_fov_button()
         self.speed_button = tk.Button(options, command=self.toggle_speed_fix,
                                       bg=PANEL, activebackground="#383838",
-                                      font=(FONT_FAMILY, 10, "bold"), padx=10, pady=7,
+                                      font=(BODY_FONT, 10, "bold"), padx=10, pady=7,
                                       bd=0, highlightthickness=0, cursor="hand2")
         self.speed_button.pack(side="left", padx=(8, 0))
         self._update_speed_button()
@@ -398,7 +403,7 @@ class CheckpointApp(tk.Tk):
         status_frame = tk.Frame(self, bg=SURFACE, padx=19, pady=11)
         status_frame.pack(fill="x")
         tk.Label(status_frame, textvariable=self.status, bg=SURFACE, fg=MUTED,
-                 font=(FONT_FAMILY, 10), anchor="w", wraplength=1000,
+                 font=(BODY_FONT, 10), anchor="w", wraplength=1000,
                  justify="left").pack(fill="x")
 
     @staticmethod
@@ -721,6 +726,39 @@ class CheckpointApp(tk.Tk):
             self.tree.focus(first)
         self._render_details()
 
+    def _gallery_configured(self, _event=None):
+        self._render_gallery()
+        if self.background_path and self.background_path.is_file():
+            if self.background_resize_job is not None:
+                self.after_cancel(self.background_resize_job)
+            self.background_resize_job = self.after(80, self._resize_gallery_background)
+
+    def _resize_gallery_background(self):
+        self.background_resize_job = None
+        width = self.gallery_canvas.winfo_width()
+        height = self.gallery_canvas.winfo_height()
+        if width < 1 or height < 1 or self.background_size == (width, height):
+            return
+        try:
+            self.background_image = tk.PhotoImage(
+                data=resized_ppm(self.background_path, width, height), format="PPM")
+        except (OSError, tk.TclError, ValueError):
+            self.background_image = None
+            return
+        self.background_size = (width, height)
+        self._render_gallery()
+
+    def _gallery_mouse_wheel(self, event, direction=None):
+        items = self.gallery_canvas.find_overlapping(event.x, event.y, event.x, event.y)
+        if not any(any(tag.startswith("gallery-save-")
+                       for tag in self.gallery_canvas.gettags(item)) for item in items):
+            return None
+        if direction is None and event.delta:
+            direction = -1 if event.delta > 0 else 1
+        if direction:
+            self._change_gallery_page(direction)
+        return "break"
+
     def _render_gallery(self):
         canvas = self.gallery_canvas
         canvas.delete("all")
@@ -728,9 +766,9 @@ class CheckpointApp(tk.Tk):
         height = canvas.winfo_height()
         compact = height < 575
         if self.background_image is not None:
-            canvas.create_image(width // 2, -130, image=self.background_image, anchor="n")
+            canvas.create_image(0, 0, image=self.background_image, anchor="nw")
         canvas.create_text(34, 36, text="MISSION SELECT", anchor="w", fill="#f7f3f2",
-                           font=(FONT_FAMILY, 27, "bold"))
+                           font=(DISPLAY_FONT, 27, "bold"))
         saves = self.library.data["saves"]
         counts = {}
         for entry in saves.values():
@@ -755,7 +793,7 @@ class CheckpointApp(tk.Tk):
         row_height = min(38, max(18, (height - row_top - 8) // max(len(maps), 1)))
         if not maps:
             canvas.create_text(left_x + 12, row_top + 12, text="NO MAP SAVES FOUND",
-                               anchor="w", fill=TEXT, font=(FONT_FAMILY, 16, "bold"))
+                               anchor="w", fill=TEXT, font=(DISPLAY_FONT, 16, "bold"))
         for index, map_name in enumerate(maps):
             y = row_top + index * row_height
             selected = map_name == self.gallery_selected_map
@@ -769,7 +807,7 @@ class CheckpointApp(tk.Tk):
             text = canvas.create_text(left_x + 18, y + (row_height - 2) // 2,
                                       text=title, anchor="w",
                                       fill="#0d0d0d" if selected else "#f1eeee",
-                                      font=(FONT_FAMILY, 14 if row_height < 30 else 17, "bold"),
+                                      font=(FONT_FAMILY, 14 if row_height < 30 else 17),
                                       tags=(tag,))
             self.gallery_rows[map_name] = (rectangle, text)
             canvas.tag_bind(tag, "<Enter>", lambda _event, key=map_name:
@@ -790,7 +828,7 @@ class CheckpointApp(tk.Tk):
                 selected_entry = None
             canvas.create_text(center_x, 91 if compact else 111,
                                text=map_title(selected).upper(),
-                               fill="#f7f3f2", font=(FONT_FAMILY, 22, "bold"))
+                               fill="#f7f3f2", font=(FONT_FAMILY, 22))
             art_name = MAP_ART.get(selected, ("", None))[1]
             preview = None
             if art_name:
@@ -821,7 +859,7 @@ class CheckpointApp(tk.Tk):
                                         fill="#21090a", outline="#673237")
                 canvas.create_text(preview_center_x, image_top + preview_height // 2,
                                    text="MAP IMAGE UNAVAILABLE",
-                                   fill=MUTED, font=(FONT_FAMILY, 15, "bold"))
+                                   fill=MUTED, font=(DISPLAY_FONT, 15, "bold"))
 
             if selected_entry:
                 stats_x = right_x + preview_width + 14
@@ -830,28 +868,30 @@ class CheckpointApp(tk.Tk):
                                         stats_x + stats_width, image_top + preview_height,
                                         fill="#20090b", outline="#683036")
                 canvas.create_text(stats_x + 9, image_top + 9, text="PLAYER STATS",
-                                   anchor="nw", fill=TEXT, font=(FONT_FAMILY, 11, "bold"))
+                                   anchor="nw", fill=TEXT, font=(FONT_FAMILY, 11))
                 players = selected_entry.get("players") or []
                 if not players:
                     canvas.create_text(stats_x + 9, image_top + 33,
                                        text="Player stats unavailable for this save.",
                                        anchor="nw", width=stats_width - 18, fill=MUTED,
-                                       font=(FONT_FAMILY, 9))
+                                       font=(BODY_FONT, 9))
                 for player_index, player in enumerate(players[:4]):
-                    y = image_top + 31 + player_index * (40 if compact else 48)
+                    y = image_top + 29 + player_index * (42 if compact else 52)
                     name = player.get("name") or f"Player {player_index + 1}"
                     canvas.create_text(stats_x + 9, y, text=name, anchor="nw",
                                        width=stats_width - 18, fill=TEXT,
-                                       font=(FONT_FAMILY, 9, "bold"))
-                    summary = (f"Pts {player.get('points', '—')}  K {player.get('kills', '—')}  "
-                               f"D {player.get('downs', '—')}  R {player.get('revives', '—')}")
-                    canvas.create_text(stats_x + 9, y + 13, text=summary, anchor="nw",
+                                       font=(BODY_FONT, 9, "bold"))
+                    summary = (f"Points {player.get('points', '—')}  "
+                               f"Kills {player.get('kills', '—')}\n"
+                               f"Downs {player.get('downs', '—')}  "
+                               f"Revives {player.get('revives', '—')}")
+                    canvas.create_text(stats_x + 9, y + 12, text=summary, anchor="nw",
                                        width=stats_width - 18, fill=MUTED,
-                                       font=(FONT_FAMILY, 8))
+                                       font=(BODY_FONT, 8))
                     weapons = player.get("weapons") or "—"
-                    canvas.create_text(stats_x + 9, y + 25, text=f"Weapons: {weapons}",
+                    canvas.create_text(stats_x + 9, y + 36, text=f"Weapons: {weapons}",
                                        anchor="nw", width=stats_width - 18, fill=MUTED,
-                                       font=(FONT_FAMILY, 8))
+                                       font=(BODY_FONT, 8))
 
             button_y = image_top + preview_height + (3 if compact else 4)
             button_height = 24 if compact else 28
@@ -867,43 +907,45 @@ class CheckpointApp(tk.Tk):
                                         outline="", tags=(tag,))
                 canvas.create_text(x, button_y + button_height // 2, text=label,
                                    fill="#0d0d0d" if enabled else "#b3aaaa",
-                                   font=(FONT_FAMILY, 11, "bold"), tags=(tag,))
+                                   font=(FONT_FAMILY, 11), tags=(tag,))
                 if enabled:
                     canvas.tag_bind(tag, "<Button-1>", lambda _event, action=command: action())
 
             all_saves = recent_map_saves(saves, selected, self.category.get(),
                                          limit=len(saves))
             total_pages = max(1, (len(all_saves) + 2) // 3)
-            self.gallery_page_index = min(self.gallery_page_index, total_pages - 1)
+            self.gallery_page_index = max(0, min(self.gallery_page_index, total_pages - 1))
             page = all_saves[self.gallery_page_index * 3:(self.gallery_page_index + 1) * 3]
             self.gallery_visible_saves = [name for name, _entry in page]
             self.gallery_selected_saves.intersection_update(name for name, _entry in all_saves)
+            save_width = button_width * 2 + 6
+            save_x = center_x - save_width // 2
             save_top = button_y + button_height + 6
             save_step = 34 if compact else 38
             save_height = 30 if compact else 34
             if not page:
                 canvas.create_text(right_x, save_top + 18,
                                    text="No saved checkpoints for this map yet.",
-                                   anchor="w", fill=MUTED, font=(FONT_FAMILY, 11))
+                                   anchor="w", fill=MUTED, font=(BODY_FONT, 11))
             for index, (name, entry) in enumerate(page):
                 y = save_top + index * save_step
                 tag = f"gallery-save-{index}"
                 active = name in self.gallery_selected_saves
                 rectangle = canvas.create_rectangle(
-                    right_x, y, right_x + right_width, y + save_height,
+                    save_x, y, save_x + save_width, y + save_height,
                     fill="#f5f4f1" if active else "#23090c",
                     outline="#f5f4f1" if active else "#683036", tags=(tag,))
                 title = canvas.create_text(
-                    right_x + 13, y + (9 if compact else 10),
+                    save_x + 13, y + (9 if compact else 10),
                     text=("★  " if entry.get("favorite") else "") +
                          (entry.get("title") or "Save Game"), anchor="w",
                     fill="#0d0d0d" if active else TEXT,
-                    font=(FONT_FAMILY, 9, "bold"), tags=(tag,))
+                    font=(BODY_FONT, 9, "bold"), tags=(tag,))
                 subtitle = canvas.create_text(
-                    right_x + 13, y + (23 if compact else 26),
+                    save_x + 13, y + (23 if compact else 26),
                     text=f"Round {entry.get('round', '?')}  ·  {save_date(entry.get('saved_at', ''))}",
                     anchor="w", fill="#252525" if active else MUTED,
-                    font=(FONT_FAMILY, 8), tags=(tag,))
+                    font=(BODY_FONT, 8), tags=(tag,))
                 self.gallery_save_rows[name] = (rectangle, title, subtitle)
                 canvas.tag_bind(tag, "<Button-1>",
                                 lambda event, save_name=name: self._select_gallery_save(save_name, event))
@@ -917,15 +959,15 @@ class CheckpointApp(tk.Tk):
                                 lambda _event, save_name=name: self._highlight_gallery_save(save_name, False))
             pager_y = save_top + 3 * save_step + (5 if compact else 7)
             canvas.create_text(center_x - 34, pager_y, text="‹", fill=TEXT,
-                               font=(FONT_FAMILY, 17), tags=("gallery-page-previous",))
+                               font=(BODY_FONT, 17), tags=("gallery-page-previous",))
             canvas.create_text(center_x, pager_y,
                                text=f"{self.gallery_page_index + 1}/{total_pages}", fill=TEXT,
-                               font=(FONT_FAMILY, 11))
+                               font=(BODY_FONT, 11))
             canvas.create_text(center_x + 34, pager_y, text="›", fill=TEXT,
-                               font=(FONT_FAMILY, 17), tags=("gallery-page-next",))
+                               font=(BODY_FONT, 17), tags=("gallery-page-next",))
             canvas.create_text(center_x + 66, pager_y,
                                text=f"{len(all_saves)} {'SAVE' if len(all_saves) == 1 else 'SAVES'} TOTAL",
-                               anchor="w", fill=TEXT, font=(FONT_FAMILY, 10))
+                               anchor="w", fill=TEXT, font=(BODY_FONT, 10))
             if self.gallery_page_index > 0:
                 canvas.tag_bind("gallery-page-previous", "<Button-1>",
                                 lambda _event: self._change_gallery_page(-1))
@@ -953,8 +995,16 @@ class CheckpointApp(tk.Tk):
         self._render_gallery()
 
     def _change_gallery_page(self, direction: int):
-        self.gallery_page_index += direction
-        self._render_gallery()
+        if not self.gallery_selected_map:
+            return
+        total_saves = len(recent_map_saves(
+            self.library.data["saves"], self.gallery_selected_map,
+            self.category.get(), limit=len(self.library.data["saves"])))
+        last_page = max(0, (total_saves - 1) // 3)
+        next_page = max(0, min(self.gallery_page_index + direction, last_page))
+        if next_page != self.gallery_page_index:
+            self.gallery_page_index = next_page
+            self._render_gallery()
 
     def _highlight_gallery_save(self, name: str, highlighted: bool):
         row = self.gallery_save_rows.get(name)
@@ -1063,7 +1113,7 @@ class CheckpointApp(tk.Tk):
         names = self.selected_names()
         if len(names) > 1:
             tk.Label(self.details, text=f"{len(names)} saves selected", bg=SURFACE, fg=TEXT,
-                     font=(FONT_FAMILY, 16, "bold")).pack(anchor="w")
+                     font=(BODY_FONT, 16, "bold")).pack(anchor="w")
             tk.Label(self.details, text="Use Export selected or Delete selected. Hold Shift to select a range, or Ctrl to select individual saves.",
                      bg=SURFACE, fg=MUTED, wraplength=245, justify="left").pack(anchor="w", pady=(8, 0))
             return
@@ -1077,18 +1127,18 @@ class CheckpointApp(tk.Tk):
                        self.library.profiles()[0])
         title = entry.get("title") or "Save Game"
         tk.Label(self.details, text=title, bg=SURFACE, fg=TEXT,
-                 font=(FONT_FAMILY, 19, "bold")).pack(anchor="w")
+                 font=(BODY_FONT, 19, "bold")).pack(anchor="w")
         tk.Label(self.details, text=save_date(entry.get("saved_at", ""), long=True),
-                 bg=SURFACE, fg=MUTED, font=(FONT_FAMILY, 10)).pack(anchor="w", pady=(0, 11))
+                 bg=SURFACE, fg=MUTED, font=(BODY_FONT, 10)).pack(anchor="w", pady=(0, 11))
         count = entry.get("player_count") or len(entry.get("players", []))
         mode = entry.get("saved_mode") or profile["mode"]
         description = "Solo · 1 player" if mode == "Solo" else (f"{count} players" if count else mode)
         for line in (f"Round {entry.get('round', '?')}", description, profile["title"]):
-            tk.Label(self.details, text=line, bg=SURFACE, fg=MUTED, font=(FONT_FAMILY, 10),
+            tk.Label(self.details, text=line, bg=SURFACE, fg=MUTED, font=(BODY_FONT, 10),
                      wraplength=245, justify="left").pack(anchor="w", pady=(0, 4))
         tk.Frame(self.details, bg=BORDER, height=1).pack(fill="x", pady=(11, 12))
         tk.Label(self.details, text="PLAYER STATS", bg=SURFACE, fg=ACCENT,
-                 font=(FONT_FAMILY, 10, "bold")).pack(anchor="w", pady=(0, 8))
+                 font=(FONT_FAMILY, 10)).pack(anchor="w", pady=(0, 8))
         players = entry.get("players") or []
         if not players:
             tk.Label(self.details, text="Player stats have not been recorded for this save.",
@@ -1102,15 +1152,15 @@ class CheckpointApp(tk.Tk):
                     player_name.casefold().startswith("unknown soldier")):
                 player_name = steam_identity.local_persona_name(core.GAME) or player_name
             tk.Label(player_frame, text=player_name, bg=PANEL,
-                     fg=TEXT, font=(FONT_FAMILY, 10, "bold")).pack(anchor="w")
+                     fg=TEXT, font=(BODY_FONT, 10, "bold")).pack(anchor="w")
             def value(key):
                 result = player.get(key)
                 return str(result) if result not in (None, "") else "—"
             tk.Label(player_frame, text=f"Points {value('points')}   Kills {value('kills')}   Downs {value('downs')}   Revives {value('revives')}",
-                     bg=PANEL, fg=MUTED, font=(FONT_FAMILY, 9), wraplength=245,
+                     bg=PANEL, fg=MUTED, font=(BODY_FONT, 9), wraplength=245,
                      justify="left").pack(anchor="w", pady=(3, 0))
             tk.Label(player_frame, text=f"Weapons / loadout: {value('weapons')}",
-                     bg=PANEL, fg=MUTED, font=(FONT_FAMILY, 9), wraplength=245,
+                     bg=PANEL, fg=MUTED, font=(BODY_FONT, 9), wraplength=245,
                      justify="left").pack(anchor="w", pady=(2, 0))
         ttk.Button(self.details, text="Start Game", command=self.start_selected_game).pack(
             anchor="w", pady=(9, 0))

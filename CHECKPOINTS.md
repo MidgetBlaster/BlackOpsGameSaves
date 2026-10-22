@@ -63,6 +63,7 @@ when missing or different, backing up any replaced files under
   over a map name to select it; the row turns white with black text. The full
   square thumbnail appears on the right, followed by New Game, Continue, and
   three saves per page. Use the arrows below the saves to change pages. The
+  mouse wheel also changes save pages without going past either end. The
   pager also shows the map's total save count. Hovering a save highlights it;
   selecting one shows its player details beside the thumbnail. All saves,
   Imported saves, Export all, and Import saves sit with the bottom controls.

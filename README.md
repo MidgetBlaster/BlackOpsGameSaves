@@ -30,8 +30,11 @@ newest save. The saved checkpoints stay on the same screen, three per page,
 with a pager and total count. Hover a save to highlight it, or right-click
 for Start Game, Rename, Favorite, Export, and Delete. The full map list fits
 without scrolling, including at the manager's minimum window size. The
-supplied Helvetica Neue LT Pro 67 Medium Condensed font is loaded privately
-by the manager, without changing Windows fonts.
+mouse wheel changes save pages, stopping at the first and last page. The
+lobby background scales with the window, while the save rows keep a compact
+width. The supplied Helvetica Neue LT Pro 67 Medium Condensed font is loaded
+privately for map titles, the Player Stats heading, and New Game and Continue;
+other text keeps its original font.
 The **Backspeed/strafe fix** button beside FoV remembers its setting. New Game Save
 sessions start with the fix enabled and apply equal backward and strafe speed
 to every player through GSC. Turning it off stays in effect when the manager
@@ -76,7 +79,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.14
+python package_release.py v1.0.15
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,
@@ -101,8 +104,7 @@ This checkout is prepared for `https://github.com/MidgetBlast/BlackOpsGameSaves`
 Push the prepared branch and release tag with:
 
 ```powershell
-git push -u origin main
-git push origin v1.0.14
+git push -u origin main --follow-tags
 ```
 
 The tag push starts the Windows release workflow. The local release package is

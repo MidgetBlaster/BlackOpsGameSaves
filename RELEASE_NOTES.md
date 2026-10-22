@@ -1,4 +1,14 @@
-# Black Ops Game Saves v1.0.14
+# Black Ops Game Saves v1.0.15
+
+- Uses the supplied condensed Helvetica only for map names, the Player Stats
+  heading, and New Game and Continue. Other text returns to its previous fonts.
+- Scales the Zombies lobby background with the window and keeps the map
+  thumbnail uncropped. Save rows stay the same compact width as the action
+  buttons while the window resizes.
+- The mouse wheel pages through saves. Page controls stop at the first and
+  last page. Player stats spell out Points, Kills, Downs, and Revives.
+
+## v1.0.14
 
 - Shows the complete square map thumbnail in Mission Select instead of the
   cropped wide preview. The image fits at both normal and minimum window sizes.
