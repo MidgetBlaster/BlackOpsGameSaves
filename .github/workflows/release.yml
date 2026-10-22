@@ -53,10 +53,7 @@ jobs:
             exit 0
           }
           gh release create $version `
-            "release/BlackOpsGameSaves-$version-windows.zip" `
-            "release/BlackOpsGameSaves.exe" `
             "release/InstallBlackOpsGameSaves.exe" `
-            "release/SHA256SUMS.txt" `
             --repo $env:GITHUB_REPOSITORY `
             --verify-tag `
             --title "Black Ops Game Saves $version" `
