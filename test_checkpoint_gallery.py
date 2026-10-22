@@ -83,10 +83,9 @@ def test_recent_saves():
             assert canvas.bbox("gallery-page-next")[3] <= canvas.winfo_height()
             assert not canvas.cget("scrollregion")
             assert canvas.bind("<MouseWheel>")
-            app._resize_gallery_background()
-            assert app.background_size == (canvas.winfo_width(), canvas.winfo_height())
-            assert app.background_image.width() == canvas.winfo_width()
-            assert app.background_image.height() == canvas.winfo_height()
+            assert app.background_image.width() == 1400
+            assert app.background_image.height() == 1100
+            assert canvas.coords("gallery-background") == [max(canvas.winfo_width(), 1000) // 2, -130]
             texts = [canvas.itemcget(item, "text") for item in canvas.find_all()
                      if canvas.type(item) == "text"]
             assert any(text.startswith("4 SAVES TOTAL") for text in texts)
@@ -182,8 +181,9 @@ def test_recent_saves():
             assert not app.saves_page.winfo_manager()
             app.geometry("1400x900")
             app.update()
-            app._resize_gallery_background()
-            assert app.background_size == (canvas.winfo_width(), canvas.winfo_height())
+            assert app.background_image.width() == 1400
+            assert app.background_image.height() == 1100
+            assert canvas.coords("gallery-background") == [max(canvas.winfo_width(), 1000) // 2, -130]
             large_save_row = next(iter(app.gallery_save_rows.values()))[0]
             assert canvas.coords(large_save_row)[2] - canvas.coords(large_save_row)[0] == save_width
         finally:

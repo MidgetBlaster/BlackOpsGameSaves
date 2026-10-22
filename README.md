@@ -31,8 +31,8 @@ with a pager and total count. Hover a save to highlight it, or right-click
 for Start Game, Rename, Favorite, Export, and Delete. The full map list fits
 without scrolling, including at the manager's minimum window size. The
 mouse wheel changes save pages, stopping at the first and last page. The
-lobby background scales with the window, while the save rows keep a compact
-width. The supplied Helvetica Neue LT Pro 67 Medium Condensed font is loaded
+lobby background keeps its original size and placement, while the save rows
+keep a compact width. The supplied Helvetica Neue LT Pro 67 Medium Condensed font is loaded
 privately for map titles, the Player Stats heading, and New Game and Continue;
 other text keeps its original font.
 The **Backspeed/strafe fix** button beside FoV remembers its setting. New Game Save
@@ -79,7 +79,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.15
+python package_release.py v1.0.16
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,

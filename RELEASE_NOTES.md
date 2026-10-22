@@ -1,4 +1,10 @@
-# Black Ops Game Saves v1.0.15
+# Black Ops Game Saves v1.0.16
+
+- Restores the fixed-size Zombies lobby background and its original centered,
+  raised placement so Mission Select lines up with the artwork while the
+  window changes size. The v1.0.15 save paging and font choices remain.
+
+## v1.0.15
 
 - Uses the supplied condensed Helvetica only for map names, the Player Stats
   heading, and New Game and Continue. Other text returns to its previous fonts.

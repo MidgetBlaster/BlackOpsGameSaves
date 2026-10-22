@@ -16,7 +16,6 @@ import zipfile
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import checkpoint_memory as core
-from background_scaler import resized_ppm
 import display_mode
 import fov_keeper
 import game_launcher
@@ -157,8 +156,6 @@ class CheckpointApp(tk.Tk):
         self.gallery_anchor_save = None
         self.gallery_save_rows = {}
         self.gallery_visible_saves = []
-        self.background_size = None
-        self.background_resize_job = None
         self.busy = False
         self.closing = False
         self.launch_after_close = None
@@ -198,11 +195,14 @@ class CheckpointApp(tk.Tk):
                                         else core.SAVE_TIMINGS[0])
         self.configure(background=BG)
         try:
-            self.background_path = (core.ROOT / "ui textures" / "png" /
-                                    "menu_zombie_lobby_frame_outer_ingame_background.png")
-            self.background_image = None
-        except OSError:
-            self.background_path = None
+            background_path = (core.ROOT / "ui textures" / "png" /
+                               "menu_zombie_lobby_frame_outer_ingame_background.png")
+            self.background_image = tk.PhotoImage(file=str(background_path))
+            self.background_label = tk.Label(self, image=self.background_image,
+                                             bg=BG, bd=0, highlightthickness=0)
+            self.background_label.place(relx=0, rely=0, relwidth=1, relheight=1)
+            self.background_label.lower()
+        except tk.TclError:
             self.background_image = None
         style = ttk.Style(self)
         style.theme_use("clam")
@@ -263,7 +263,7 @@ class CheckpointApp(tk.Tk):
         self.gallery_page.pack(fill="both", expand=True)
         self.gallery_canvas = tk.Canvas(self.gallery_page, bg=BG, highlightthickness=0, bd=0)
         self.gallery_canvas.pack(fill="both", expand=True)
-        self.gallery_canvas.bind("<Configure>", self._gallery_configured)
+        self.gallery_canvas.bind("<Configure>", lambda _event: self._render_gallery())
         self.gallery_canvas.bind("<MouseWheel>", self._gallery_mouse_wheel)
         self.gallery_canvas.bind("<Button-4>", lambda event: self._gallery_mouse_wheel(event, -1))
         self.gallery_canvas.bind("<Button-5>", lambda event: self._gallery_mouse_wheel(event, 1))
@@ -726,28 +726,6 @@ class CheckpointApp(tk.Tk):
             self.tree.focus(first)
         self._render_details()
 
-    def _gallery_configured(self, _event=None):
-        self._render_gallery()
-        if self.background_path and self.background_path.is_file():
-            if self.background_resize_job is not None:
-                self.after_cancel(self.background_resize_job)
-            self.background_resize_job = self.after(80, self._resize_gallery_background)
-
-    def _resize_gallery_background(self):
-        self.background_resize_job = None
-        width = self.gallery_canvas.winfo_width()
-        height = self.gallery_canvas.winfo_height()
-        if width < 1 or height < 1 or self.background_size == (width, height):
-            return
-        try:
-            self.background_image = tk.PhotoImage(
-                data=resized_ppm(self.background_path, width, height), format="PPM")
-        except (OSError, tk.TclError, ValueError):
-            self.background_image = None
-            return
-        self.background_size = (width, height)
-        self._render_gallery()
-
     def _gallery_mouse_wheel(self, event, direction=None):
         items = self.gallery_canvas.find_overlapping(event.x, event.y, event.x, event.y)
         if not any(any(tag.startswith("gallery-save-")
@@ -766,7 +744,8 @@ class CheckpointApp(tk.Tk):
         height = canvas.winfo_height()
         compact = height < 575
         if self.background_image is not None:
-            canvas.create_image(0, 0, image=self.background_image, anchor="nw")
+            canvas.create_image(width // 2, -130, image=self.background_image,
+                                anchor="n", tags=("gallery-background",))
         canvas.create_text(34, 36, text="MISSION SELECT", anchor="w", fill="#f7f3f2",
                            font=(DISPLAY_FONT, 27, "bold"))
         saves = self.library.data["saves"]

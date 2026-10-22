@@ -17,7 +17,7 @@ changes pages, stopping at the first and last page. Right-click a save
 for Start Game, Rename, Favorite, Export Save, or Delete. Export all and Import
 saves are in the bottom controls. The requested condensed Helvetica font is
 included for map titles, Player Stats, New Game, and Continue. The lobby
-background scales with the window, and save rows stay compact.
+background keeps its original placement, and save rows stay compact.
 The Backspeed/strafe fix toggle beside FoV is remembered across launches.
 New checkpoints can restore the held weapon after Continue with the bundled
 checkpoint reader. Older checkpoints retain their matching scripts.

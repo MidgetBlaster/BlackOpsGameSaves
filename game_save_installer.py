@@ -24,8 +24,7 @@ PACKAGE_FILES = (
     "zone/Common/frontend_patch.ff",
 )
 MOD_FILES = (
-    "checkpoint.py", "checkpoint_gui.py", "background_scaler.py",
-    "checkpoint_memory.py",
+    "checkpoint.py", "checkpoint_gui.py", "checkpoint_memory.py",
     "checkpoint_stats.py", "save_library.py", "game_launcher.py",
     "fov_keeper.py", "steam_identity.py",
     "game_save_installer.py", "checkpoint.cfg", "checkpoint_speed.cfg",
