@@ -307,6 +307,9 @@ class GameProcess:
     def press_coop_resume(self):
         self.press_game_key(0x77, "F8 co-op resume")
 
+    def press_speed_fix(self):
+        self.press_game_key(0x74, "F5 movement settings")
+
     def press_game_key(self, virtual_key: int, description: str):
         if not self.foreground():
             raise RuntimeError(f"Bring Black Ops to the foreground before requesting the {description} key")
@@ -414,6 +417,12 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
     metadata = {"format": 1, "executable_sha256": SUPPORTED_SHA256,
                 "save_address": address, "round": round_number,
                 "saved_at": datetime.now().astimezone().isoformat(), **h}
+    options_script = ROOT / "maps" / "_checkpoint_coop_pause.gsc"
+    options_variant = (ROOT / "scriptdata" / "checkpoint_variants" /
+                       "_checkpoint_coop_pause_v2.gsc")
+    if (options_script.is_file() and options_variant.is_file() and
+            options_script.read_bytes() == options_variant.read_bytes()):
+        metadata["script_variant"] = "player_options_v1"
     pieces = {"save.bin": image, "state.bin": parts[0], "secondary.bin": parts[1]}
     metadata["sha256"] = {name: hashlib.sha256(data).hexdigest() for name, data in pieces.items()}
     temporary = target.with_suffix(".part")

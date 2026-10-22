@@ -1,4 +1,15 @@
-# Black Ops Game Saves v1.0.11
+# Black Ops Game Saves v1.0.12
+
+- Stretches the lobby artwork vertically and places Mission Select in its top
+  band, with map rows and preview aligned below it.
+- Adds a persistent Backspeed/strafe fix toggle beside FoV. The new GSC applies
+  equal backward and strafe speed to joined players when enabled. Older
+  checkpoint sessions can apply it to the local player.
+- For checkpoints made with the new script, reads the saved equipped weapon
+  for each player and requests that weapon after Continue. Older script
+  variants remain available for their existing checkpoints.
+
+## v1.0.11
 
 - Redesigns map selection around the Zombies lobby frame: map rows on the left,
   a wide selected-map preview on the right, and the three newest saves below.

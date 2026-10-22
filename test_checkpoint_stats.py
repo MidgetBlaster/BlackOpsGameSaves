@@ -7,6 +7,17 @@ from unittest.mock import patch
 import checkpoint_stats
 
 
+def test_decoder():
+    assert checkpoint_stats._decode_block(bytes([22]) + b"HELLO" + bytes([17, 0, 0])) == b"HELLO"
+    for invalid in (b"", bytes([22]) + b"HI", bytes([22]) + b"HELLO" + bytes([17, 0, 0, 1])):
+        try:
+            checkpoint_stats._decode_block(invalid)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Malformed checkpoint block was accepted")
+
+
 def test_two_players():
     names = ("m1911_zm", "thompson_zm")
     weapon_data = struct.pack("<I", len(names) + 1) + b"".join(
@@ -30,12 +41,15 @@ def test_two_players():
         players = checkpoint_stats.extract_players(Path("synthetic.bo1checkpoint"))
     assert players == [
         {"name": "Alice", "points": 2350, "weapons": "M1911 (equipped)",
+         "client_slot": 0, "equipped_weapon_raw": "m1911_zm",
          "revives": 0, "downs": 1, "kills": 18},
         {"name": "Bob", "points": 4170, "weapons": "Thompson (equipped)",
+         "client_slot": 1, "equipped_weapon_raw": "thompson_zm",
          "revives": 3, "downs": 2, "kills": 29},
     ]
 
 
 if __name__ == "__main__":
+    test_decoder()
     test_two_players()
     print("Two-player checkpoint stat decoding passed")

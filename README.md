@@ -5,7 +5,7 @@ Save and restore your checkpoint saves in Black Ops Zombies.
 A Windows save manager for Call of Duty: Black Ops Zombies. It copies in-memory
 Zombies checkpoints to files after rounds and lets you resume a selected save
 later. The manager supports Solo and Co-op checkpoints, map artwork, player
-stats, favorites, save export/import, FoV controls, and a co-op pause toggle.
+stats, favorites, save export/import, FoV and movement controls, and a co-op pause toggle.
 
 ## Install
 
@@ -23,9 +23,20 @@ executable before copying anything. It installs the Game Save mod, map
 thumbnails, `game_mod` loader, manager, and icon together. Only the installer
 EXE is needed on another machine; all required files are embedded. Personal checkpoints
 are never included in the installer, and existing checkpoints are retained.
-The map screen uses the Zombies lobby frame, shows maps in rows on the left,
+The map screen stretches the Zombies lobby frame vertically, shows maps in rows on the left,
 and previews the selected map, its three newest saves, and its total save count
 on the right.
+The **Backspeed/strafe fix** button beside FoV remembers its setting. New Game Save
+sessions apply equal backward and strafe speed to every player through GSC.
+Older checkpoint sessions can apply the toggle to the local player without
+changing the checkpoint scripts.
+New checkpoints also record which script variant they use. On Continue, the
+manager requests the equipped weapon stored in the checkpoint for each player
+after the game has loaded. The checkpoint reader is built into the installer;
+if a damaged save lacks a readable equipped weapon, the game still loads and
+the manager reports the warning.
+Older saves keep their matching scripts and remain loadable; their weapon
+selection is unchanged.
 
 The manager needs Administrator access to read and write the game's memory.
 It watches rounds while open. Press F11 in the game for an extra manual save.
@@ -49,7 +60,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.11
+python package_release.py v1.0.12
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,
@@ -75,7 +86,7 @@ Push the prepared branch and release tag with:
 
 ```powershell
 git push -u origin main
-git push origin v1.0.11
+git push origin v1.0.12
 ```
 
 The tag push starts the Windows release workflow. The local release package is

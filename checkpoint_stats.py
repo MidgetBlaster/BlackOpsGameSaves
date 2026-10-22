@@ -1,48 +1,95 @@
-"""Read player summaries from the retail Zombies memory-save payload.
-
-The save's game-state segments use LZO1X blocks. FFmpeg's installed avutil
-decoder supplies LZO without changing the mod or the checkpoint format.
-"""
+"""Read player summaries from the retail Zombies memory-save payload."""
 
 from __future__ import annotations
 
-import ctypes
-from functools import lru_cache
 import json
 from pathlib import Path
 import re
-import shutil
 import struct
 import zipfile
 
 
-@lru_cache(maxsize=1)
-def _lzo_decoder():
-    executable = shutil.which("ffmpeg")
-    if not executable:
-        raise RuntimeError("FFmpeg is needed to read player stats")
-    libraries = sorted(Path(executable).parent.glob("avutil-*.dll"))
-    if not libraries:
-        raise RuntimeError("FFmpeg's LZO decoder is unavailable")
-    library = ctypes.CDLL(str(libraries[-1]))
-    decoder = library.av_lzo1x_decode
-    decoder.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
-                        ctypes.c_void_p, ctypes.POINTER(ctypes.c_int))
-    decoder.restype = ctypes.c_int
-    return library, decoder
-
-
 def _decode_block(data: bytes) -> bytes:
-    _, decoder = _lzo_decoder()
-    source = ctypes.create_string_buffer(data + b"\0" * 8)
-    target = ctypes.create_string_buffer(32760 + 12)
-    output_left = ctypes.c_int(32760)
-    input_left = ctypes.c_int(len(data))
-    status = decoder(target, ctypes.byref(output_left), source,
-                     ctypes.byref(input_left))
-    if status:
-        raise ValueError(f"Invalid compressed save block ({status})")
-    return target.raw[:32760 - output_left.value]
+    """Decode one bounded LZO1X block from a checkpoint without a system DLL."""
+    position = 0
+    output = bytearray()
+
+    def next_byte():
+        nonlocal position
+        if position >= len(data):
+            raise ValueError("Truncated checkpoint compression block")
+        value = data[position]
+        position += 1
+        return value
+
+    def length(code, mask):
+        result = code & mask
+        if result == 0:
+            while True:
+                value = next_byte()
+                if value:
+                    return result + mask + value
+                result += 255
+                if result > 32760:
+                    raise ValueError("Checkpoint compression length is too large")
+        return result
+
+    def literal(count):
+        nonlocal position
+        if count < 0 or position + count > len(data) or len(output) + count > 32760:
+            raise ValueError("Invalid checkpoint literal run")
+        output.extend(data[position:position + count])
+        position += count
+
+    def repeat(distance, count):
+        if distance <= 0 or distance > len(output) or len(output) + count > 32760:
+            raise ValueError("Invalid checkpoint back reference")
+        for _ in range(count):
+            output.append(output[-distance])
+
+    code = next_byte()
+    if code > 17:
+        literal(code - 17)
+        code = next_byte()
+        if code < 16:
+            raise ValueError("Invalid initial checkpoint match")
+    state = 0
+    while True:
+        if code > 63:
+            count = (code >> 5) - 1
+            distance = (next_byte() << 3) + ((code >> 2) & 7) + 1
+        elif code > 31:
+            count = length(code, 31)
+            pair = next_byte()
+            distance = (next_byte() << 6) + (pair >> 2) + 1
+            code = pair
+        elif code > 15:
+            count = length(code, 7)
+            distance = (1 << 14) + ((code & 8) << 11)
+            pair = next_byte()
+            distance += (next_byte() << 6) + (pair >> 2)
+            code = pair
+            if distance == 1 << 14:
+                if count != 1:
+                    raise ValueError("Invalid checkpoint end marker")
+                break
+        elif state == 0:
+            literal(length(code, 15) + 3)
+            code = next_byte()
+            if code > 15:
+                continue
+            count = 1
+            distance = (1 << 11) + (next_byte() << 2) + (code >> 2) + 1
+        else:
+            count = 0
+            distance = (next_byte() << 2) + (code >> 2) + 1
+        repeat(distance, count + 2)
+        state = code & 3
+        literal(state)
+        code = next_byte()
+    if position != len(data):
+        raise ValueError("Unexpected bytes after checkpoint end marker")
+    return bytes(output)
 
 
 def _game_segments(path: Path) -> tuple[bytes, bytes, bytes]:
@@ -145,6 +192,8 @@ def extract_players(path: Path) -> list[dict]:
                             (" (equipped)" if index == active else "") for index in held)
         player = {"name": name_bytes.decode("ascii", "replace"),
                   "points": points, "weapons": loadout,
+                  "client_slot": client,
+                  "equipped_weapon_raw": names[active] if active else "",
                   "revives": revives, "downs": downs, "kills": kills}
         players[client] = player
     return [players[index] for index in sorted(players)]

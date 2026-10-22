@@ -123,6 +123,7 @@ class CheckpointApp(tk.Tk):
         self.coop_paused = False
         self.coop_pause_pid = None
         self.current_session_legacy = None
+        self.current_session_options = None
         self.current_map = None
         self.map_images = {}
         self.gallery_selected_map = None
@@ -149,13 +150,15 @@ class CheckpointApp(tk.Tk):
         self.fov_value = tk.StringVar(value=f"{fov:g}")
         self.fov_scale = tk.StringVar(value=f"{scale:.2f}")
         self.fov_settings = (self.fov_enabled, fov, scale)
+        self.speed_fix_enabled = bool(self.library.data.get("speed_fix_enabled", False))
+        self._write_speed_config()
         self.category = tk.StringVar(value="All saves")
         self.search = tk.StringVar()
         self.status = tk.StringVar(value="Recovery save found." if recovered else
                                    "Automatic saves happen after each round. F11 makes a manual save.")
         if core.game_pid() is None:
             try:
-                game_launcher.prepare_script_variant(legacy=False)
+                game_launcher.prepare_script_variant(legacy=False, enhanced=True)
             except (OSError, RuntimeError) as error:
                 self.status.set(f"Could not prepare the pause script: {error}")
         self.save_policy = tk.StringVar(value=self.library.data.get("save_policy", "Keep new saves"))
@@ -214,6 +217,7 @@ class CheckpointApp(tk.Tk):
 
     def _build(self):
         heading = tk.Frame(self, bg=SURFACE, padx=22, pady=9)
+        self.heading = heading
         heading.pack(fill="x")
         tk.Label(heading, text="GAME SAVE  ·  BLACK OPS ZOMBIES", bg=SURFACE, fg=ACCENT,
                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
@@ -221,6 +225,7 @@ class CheckpointApp(tk.Tk):
                                       font=("Arial Narrow", 26, "bold"))
         self.heading_title.pack(anchor="w")
         outer = ttk.Frame(self, padding=10)
+        self.outer = outer
         outer.pack(fill="both", expand=True)
         self.gallery_page = ttk.Frame(outer)
         self.gallery_page.pack(fill="both", expand=True)
@@ -235,6 +240,7 @@ class CheckpointApp(tk.Tk):
         self.gallery_canvas.pack(fill="both", expand=True)
         self.gallery_canvas.bind("<Configure>", lambda _event: self._render_gallery())
         self._bind_wheel(self.gallery_canvas, self._scroll_gallery)
+        self.heading.pack_forget()  # Mission Select is drawn on the lobby artwork.
 
         self.saves_page = ttk.Frame(outer)
         top = ttk.Frame(self.saves_page)
@@ -346,6 +352,12 @@ class CheckpointApp(tk.Tk):
                                     bd=0, highlightthickness=0, cursor="hand2")
         self.fov_button.pack(side="left", padx=(6, 0))
         self._update_fov_button()
+        self.speed_button = tk.Button(options, command=self.toggle_speed_fix,
+                                      bg=PANEL, activebackground="#383838",
+                                      font=("Segoe UI", 10, "bold"), padx=10, pady=7,
+                                      bd=0, highlightthickness=0, cursor="hand2")
+        self.speed_button.pack(side="left", padx=(8, 0))
+        self._update_speed_button()
         self.install_button = ttk.Button(options, text="Install Game Save mod",
                                          command=self.install_mod)
         self.install_button.pack(side="right")
@@ -445,6 +457,64 @@ class CheckpointApp(tk.Tk):
         self.fov_button.configure(text="FoV On" if self.fov_enabled else "FoV Off",
                                   fg="#6dda82" if self.fov_enabled else "#f07575",
                                   activeforeground="#6dda82" if self.fov_enabled else "#f07575")
+
+    def _write_speed_config(self):
+        path = core.ROOT / "checkpoint_speed.cfg"
+        temporary = path.with_suffix(".cfg.tmp")
+        content = f"set checkpoint_speed_fix {int(self.speed_fix_enabled)}\n"
+        temporary.write_text(content, encoding="ascii")
+        temporary.replace(path)
+        compatibility = core.ROOT / "mods" / core.ROOT.name / "checkpoint_speed.cfg"
+        compatibility.parent.mkdir(parents=True, exist_ok=True)
+        compatibility.write_text(content, encoding="ascii")
+        local_content = ("set player_backSpeedScale 1\nset player_strafeSpeedScale 1\n"
+                         if self.speed_fix_enabled else
+                         "reset player_backSpeedScale\nreset player_strafeSpeedScale\n")
+        for local_path in (core.ROOT / "checkpoint_speed_local.cfg",
+                           compatibility.parent / "checkpoint_speed_local.cfg"):
+            local_path.write_text(local_content, encoding="ascii")
+
+    def _update_speed_button(self):
+        self.speed_button.configure(
+            text=("☑ Backspeed/strafe fix" if self.speed_fix_enabled else
+                  "✖ Backspeed/strafe fix"),
+            fg="#6dda82" if self.speed_fix_enabled else "#f07575",
+            activeforeground="#6dda82" if self.speed_fix_enabled else "#f07575")
+
+    def toggle_speed_fix(self):
+        self.speed_fix_enabled = not self.speed_fix_enabled
+        self.library.data["speed_fix_enabled"] = self.speed_fix_enabled
+        self.library.write()
+        self._write_speed_config()
+        self._update_speed_button()
+        if self.busy:
+            self.status.set("Movement setting saved. It will apply with the next map load.")
+            return
+        local_only = self.current_session_options is False
+        pid = core.game_pid()
+        if pid is None:
+            self.status.set("Movement setting saved for the next Black Ops launch.")
+            return
+
+        def work():
+            game = core.GameProcess(pid)
+            try:
+                game_launcher.wait_for_focus(game)
+                if local_only:
+                    game.press_game_key(0x72, "F3 local movement fix")
+                else:
+                    game.press_speed_fix()
+            finally:
+                game.close()
+            self.events.put(("speed_changed", self.speed_fix_enabled, local_only))
+
+        def run():
+            try:
+                work()
+            except Exception as error:
+                self.events.put(("speed_error", str(error)))
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _commit_fov(self, _event=None):
         try:
@@ -634,7 +704,9 @@ class CheckpointApp(tk.Tk):
         width = max(canvas.winfo_width(), 1000)
         height = max(canvas.winfo_height(), 520)
         if self.background_image is not None:
-            canvas.create_image(width // 2, 0, image=self.background_image, anchor="n")
+            canvas.create_image(width // 2, -130, image=self.background_image, anchor="n")
+        canvas.create_text(34, 36, text="MISSION SELECT", anchor="w", fill="#f7f3f2",
+                           font=("Arial Narrow", 27, "bold"))
         saves = self.library.data["saves"]
         counts = {}
         for entry in saves.values():
@@ -652,7 +724,7 @@ class CheckpointApp(tk.Tk):
 
         left_x = 28
         left_width = min(435, int(width * 0.38))
-        row_top = 20
+        row_top = 113
         row_height = 38
         if not maps:
             canvas.create_text(left_x + 12, row_top + 12, text="NO MAP SAVES FOUND",
@@ -686,7 +758,7 @@ class CheckpointApp(tk.Tk):
             right_x = left_x + left_width + 52
             right_width = width - right_x - 25
             center_x = right_x + right_width // 2
-            canvas.create_text(center_x, 29, text=map_title(selected).upper(),
+            canvas.create_text(center_x, 111, text=map_title(selected).upper(),
                                fill="#f7f3f2", font=("Arial Narrow", 22, "bold"))
             art_name = MAP_ART.get(selected, ("", None))[1]
             preview = None
@@ -699,7 +771,7 @@ class CheckpointApp(tk.Tk):
                     preview = self.map_images[key]
                 except tk.TclError:
                     pass
-            image_top = 55
+            image_top = 137
             if preview is not None:
                 image_id = canvas.create_image(center_x, image_top, image=preview,
                                                anchor="n", tags=("gallery-preview",))
@@ -715,7 +787,7 @@ class CheckpointApp(tk.Tk):
                 canvas.create_text(center_x, image_top + 125, text="MAP IMAGE UNAVAILABLE",
                                    fill=MUTED, font=("Arial Narrow", 15, "bold"))
 
-            section_y = 320
+            section_y = 400
             canvas.create_text(right_x, section_y, text="RECENT SAVES", anchor="w",
                                fill=TEXT, font=("Arial Narrow", 15, "bold"))
             count = counts.get(selected, 0)
@@ -746,7 +818,7 @@ class CheckpointApp(tk.Tk):
                                 lambda _event: canvas.configure(cursor="hand2"))
                 canvas.tag_bind(tag, "<Leave>",
                                 lambda _event: canvas.configure(cursor=""))
-        canvas.configure(scrollregion=(0, 0, width, max(height, 535)))
+        canvas.configure(scrollregion=(0, 0, width, max(height, 615)))
         canvas.yview_moveto(previous_scroll)
 
     def _highlight_gallery_row(self, map_name: str, highlighted: bool):
@@ -777,6 +849,8 @@ class CheckpointApp(tk.Tk):
     def show_map(self, map_name: str):
         self.gallery_selected_map = map_name
         self.current_map = map_name
+        if not self.heading.winfo_manager():
+            self.heading.pack(fill="x", before=self.outer)
         self.heading_title.configure(text="SAVED CHECKPOINTS")
         self.map_heading.configure(text=map_title(map_name))
         self.selected_map_caption.configure(text=map_title(map_name))
@@ -799,6 +873,7 @@ class CheckpointApp(tk.Tk):
     def show_gallery(self):
         self.current_map = None
         self.heading_title.configure(text="MISSION SELECT")
+        self.heading.pack_forget()
         self.saves_page.pack_forget()
         self.gallery_page.pack(fill="both", expand=True, before=self.actions)
         self.refresh()
@@ -807,6 +882,7 @@ class CheckpointApp(tk.Tk):
         if self.busy or not self.current_map:
             return
         map_name = self.current_map
+        self.current_session_options = None
         self.start_cancel = threading.Event()
         self.cancel_start_button.configure(state="normal")
         self._set_busy(True)
@@ -1117,6 +1193,7 @@ class CheckpointApp(tk.Tk):
         mode = self._mode_for_save(entry)
         if mode is None:
             return
+        self.current_session_options = None
         self.pending_coop = None
         self.start_cancel = threading.Event()
         self.cancel_start_button.configure(state="normal")
@@ -1136,12 +1213,17 @@ class CheckpointApp(tk.Tk):
             try:
                 if mode == "Co-op":
                     self.events.put(("coop_waiting", name, entry["title"], metadata["round"],
-                                     entry["profile_id"], game_launcher.legacy_scripts(metadata)))
+                                     entry["profile_id"], game_launcher.legacy_scripts(metadata),
+                                     game_launcher.enhanced_scripts(metadata)))
                     return
                 self.events.put(("startup_status", "Map ready. Making a fresh checkpoint, then restoring your save..."))
-                game_launcher.restore_and_continue(game, save_path, mode, self.start_cancel)
+                loaded = game_launcher.restore_and_continue(
+                    game, save_path, mode, self.start_cancel,
+                    speed_fix_enabled=self.speed_fix_enabled)
                 self.events.put(("start_loaded", name, entry["title"], metadata["round"],
-                                 entry["profile_id"], game_launcher.legacy_scripts(metadata)))
+                                 entry["profile_id"], game_launcher.legacy_scripts(metadata),
+                                 game_launcher.enhanced_scripts(metadata),
+                                 loaded.get("weapon_restore_warning", "")))
             finally:
                 game.close()
         self._start_worker(work)
@@ -1175,9 +1257,13 @@ class CheckpointApp(tk.Tk):
                 save_path = core.ARCHIVE / name
                 metadata, _ = core.load_archive(save_path)
                 game_launcher.wait_for_map_ready(game, metadata["map"], self.start_cancel)
-                game_launcher.restore_and_continue(game, save_path, "Co-op", self.start_cancel)
+                loaded = game_launcher.restore_and_continue(
+                    game, save_path, "Co-op", self.start_cancel,
+                    speed_fix_enabled=self.speed_fix_enabled)
                 self.events.put(("start_loaded", name, title, round_number, profile_id,
-                                 game_launcher.legacy_scripts(metadata)))
+                                 game_launcher.legacy_scripts(metadata),
+                                 game_launcher.enhanced_scripts(metadata),
+                                 loaded.get("weapon_restore_warning", "")))
             finally:
                 game.close()
         self._start_worker(work)
@@ -1285,6 +1371,13 @@ class CheckpointApp(tk.Tk):
                 elif kind == "fov_error":
                     if self.fov_enabled:
                         self.status.set(f"FoV changer: {event[1]}")
+                elif kind == "speed_changed":
+                    self.status.set(("Local player movement updated; older checkpoint scripts cannot change remote players."
+                                     if event[2] else
+                                     "Backspeed/strafe fix requested for joined players.")
+                                    if event[1] else "Backspeed/strafe fix turned off.")
+                elif kind == "speed_error":
+                    self.status.set(f"Movement setting saved; could not apply it to the running game: {event[1]}")
                 elif kind == "display_error":
                     self.display_working = False
                     self.status.set(f"Could not change display mode: {event[1]}")
@@ -1313,17 +1406,19 @@ class CheckpointApp(tk.Tk):
                 elif kind == "startup_status":
                     self.status.set(event[1])
                 elif kind == "coop_waiting":
-                    _, name, title, round_number, profile_id, legacy = event
+                    _, name, title, round_number, profile_id, legacy, options = event
                     self.pending_coop = (name, title, round_number, profile_id)
                     self.current_session_legacy = legacy
+                    self.current_session_options = options
                     self.start_cancel = None
                     self.cancel_start_button.configure(state="disabled")
                     self._set_busy(False)
                     self.status.set(f"{title} is on the matching map. Waiting for all co-op players to rejoin.")
                     self.after(100, self._ask_coop_ready)
                 elif kind == "start_loaded":
-                    _, name, title, round_number, profile_id, legacy = event
+                    _, name, title, round_number, profile_id, legacy, options, weapon_warning = event
                     self.current_session_legacy = legacy
+                    self.current_session_options = options
                     self.pending_coop = None
                     self.started_save_name = name
                     self.skip_initial_round = round_number
@@ -1332,13 +1427,15 @@ class CheckpointApp(tk.Tk):
                     self._set_busy(False)
                     self.library.set_active_profile(profile_id)
                     self.refresh()
-                    self.status.set(f"Loaded {title}. Auto save: {self.save_timing.get().lower()}; F11 saves manually.")
+                    self.status.set(f"Loaded {title}. Auto save: {self.save_timing.get().lower()}; F11 saves manually."
+                                    + (f" {weapon_warning}" if weapon_warning else ""))
                     self._start_watch()
                 elif kind == "new_game_started":
                     map_name = event[1]
                     self.started_save_name = None
                     self.skip_initial_round = None
                     self.current_session_legacy = False
+                    self.current_session_options = True
                     self.start_cancel = None
                     self.cancel_start_button.configure(state="disabled")
                     self.library.new_profile(

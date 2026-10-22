@@ -59,7 +59,8 @@ when missing or different, backing up any replaced files under
 `Game Save` installation are kept. Later, open the manager with
 `mods/Game Save/Open Game Save.cmd`.
 
-- The first screen uses the Zombies lobby frame as its background. Map titles
+- The first screen stretches the Zombies lobby frame vertically. Mission Select
+  sits in its top band; map titles
   appear in rows on the left; the selected row turns white with black text.
   The map preview appears on the right, with its three most recent saves and
   total save count below it. Click the preview or the total count to see every save
@@ -68,8 +69,8 @@ when missing or different, backing up any replaced files under
   selected save's details appear on the right. Turn the mouse wheel over the
   maps or save list to scroll; neither list shows a scrollbar.
 - The player panel shows points, weapons or loadout, revives, downs, and
-  kills for each player. The manager reads these from checkpoints when the
-  local FFmpeg LZO decoder is available. The host's Steam name is used in the
+  kills for each player. The manager reads these from checkpoints with its
+  built-in LZO decoder. The host's Steam name is used in the
   display when an older checkpoint calls that player Unknown Soldier.
   Cooperative player extraction still needs validation with a real cooperative checkpoint.
 - The manager starts watching when it opens. It makes a checkpoint when the
@@ -116,7 +117,11 @@ when missing or different, backing up any replaced files under
   retries during opening if the first key press was ignored, verifies the fresh
   checkpoint, briefly suspends the game to restore the selected checkpoint,
   then presses F12 to run `loadgame_continue`. It waits for the saved round to
-  resume. It does not send any weapon-switch input. The restored round is not
+  resume. For checkpoints made with the new player-options script, it then
+  reads each player's equipped raw weapon ID from the checkpoint and asks GSC
+  to select that weapon if the player still owns it. If a damaged checkpoint
+  has no readable equipped weapon, the manager reports a warning and leaves
+  the restored loadout alone. The restored round is not
   archived again; saving resumes on the next round or player F11. You can cancel
   while it is preparing. A game launched before the new F10 binding was added
   needs one restart through the manager to install that binding.
@@ -139,6 +144,13 @@ when missing or different, backing up any replaced files under
   separate multiplayer executable. The pointer locations and refresh behavior
   are adapted from [CoD SCZ FoV Changer](https://github.com/marvinlehmann/CoD-SCZ-FoV-Changer)
   by Marvin Lehmann.
+- **Backspeed/strafe fix** beside FoV shows a green check when enabled and a
+  red X when disabled. Its setting is saved for the next launch. In new Game
+  Save sessions, GSC applies `player_backSpeedScale=1` and
+  `player_strafeSpeedScale=1` to joined players while enabled. Older checkpoint
+  scripts remain unchanged so their script checksums continue to match. The
+  manager applies the setting to the local player in those older sessions;
+  remote co-op players need a new-script session for the shared setting.
 - The **Display** selector at the bottom right offers Windowed, Fullscreen,
   and Borderless. Borderless is the default. The selection is remembered in the
   save catalog and applied automatically when Black Ops starts. Borderless

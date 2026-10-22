@@ -5,8 +5,58 @@
 init()
 {
 	SetDvar( "checkpoint_coop_pause", "0" );
+	SetDvar( "checkpoint_restore_token", "" );
 	level.checkpoint_coop_paused = false;
 	level thread watch_pause_request();
+	level.checkpoint_back_speed_default = GetDvar( "player_backSpeedScale" );
+	level.checkpoint_strafe_speed_default = GetDvar( "player_strafeSpeedScale" );
+	level thread watch_player_options();
+}
+
+// The manager sends a restore request only after loadgame_continue has finished.
+// The saved client index and raw weapon name come from the checkpoint payload.
+watch_player_options()
+{
+	level endon( "end_game" );
+	last_speed_fix = false;
+	last_weapon_token = "";
+	for( ;; )
+	{
+		speed_fix = GetDvarInt( "checkpoint_speed_fix" ) != 0;
+		players = get_players();
+		if( speed_fix )
+		{
+			for( i = 0; i < players.size; i++ )
+				players[i] SetClientDvars( "player_backSpeedScale", "1",
+					"player_strafeSpeedScale", "1" );
+		}
+		else if( last_speed_fix && level.checkpoint_back_speed_default != "" &&
+			level.checkpoint_strafe_speed_default != "" )
+		{
+			for( i = 0; i < players.size; i++ )
+				players[i] SetClientDvars( "player_backSpeedScale", level.checkpoint_back_speed_default,
+					"player_strafeSpeedScale", level.checkpoint_strafe_speed_default );
+		}
+		last_speed_fix = speed_fix;
+
+		token = GetDvar( "checkpoint_restore_token" );
+		if( token != "" && token != last_weapon_token )
+		{
+			last_weapon_token = token;
+			for( i = 0; i < players.size; i++ )
+			{
+				client = players[i] GetEntityNumber();
+				if( client < 0 || client > 3 )
+					continue;
+				weapon = GetDvar( "checkpoint_restore_weapon_" + client );
+				if( weapon != "" && players[i] HasWeapon( weapon ) &&
+					players[i] GetCurrentWeapon() != weapon )
+					players[i] SwitchToWeapon( weapon );
+			}
+			SetDvar( "checkpoint_restore_token", "" );
+		}
+		wait 0.5;
+	}
 }
 
 watch_pause_request()

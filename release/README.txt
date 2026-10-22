@@ -13,6 +13,9 @@ not contain personal checkpoints. The manager's map selection screen uses the
 Zombies lobby background and shows each selected map's three newest saves and
 total save count. Use Export selected or Export all to make a .bo1gamesave file, copy that
 file to another computer, and choose Import saves there.
+The Backspeed/strafe fix toggle beside FoV is remembered across launches.
+New checkpoints can restore the held weapon after Continue with the bundled
+checkpoint reader. Older checkpoints retain their matching scripts.
 Hold Shift or Ctrl in a map's save list to select several saves before
 using Export selected or Delete selected.
 

@@ -50,15 +50,19 @@ def test_recent_saves():
         app = gui.CheckpointApp()
         try:
             app.update()
+            assert "Backspeed/strafe fix" in app.speed_button.cget("text")
+            assert app.speed_button.cget("fg") == "#f07575"
             assert app.gallery_selected_map == "zombie_theater"
             assert len(app.gallery_rows) == len(gui.MAP_ART)
             canvas = app.gallery_canvas
+            assert not app.heading.winfo_manager()
             assert canvas.bbox("gallery-map-10")[3] <= canvas.winfo_height()
             assert canvas.bbox("gallery-save-2")[3] <= canvas.winfo_height(), (
                 canvas.bbox("gallery-save-2"), canvas.winfo_height())
             texts = [canvas.itemcget(item, "text") for item in canvas.find_all()
                      if canvas.type(item) == "text"]
             assert any(text.startswith("4 SAVES TOTAL") for text in texts)
+            assert "MISSION SELECT" in texts
             assert all(f"Save Game {number}" in texts for number in (2, 3, 4))
             assert "Save Game 1" not in texts
             rectangle, title = app.gallery_rows["zombie_theater"]
@@ -69,6 +73,7 @@ def test_recent_saves():
             assert canvas.itemcget(rectangle, "fill") == "#f5f4f1"
             assert canvas.itemcget(title, "fill") == "#0d0d0d"
             app.show_map("zombie_cod5_factory")
+            assert app.heading.winfo_manager() == "pack"
             assert app.current_map == "zombie_cod5_factory"
             app.show_gallery()
             assert app.heading_title.cget("text") == "MISSION SELECT"
