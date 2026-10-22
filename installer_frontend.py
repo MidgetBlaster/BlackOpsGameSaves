@@ -6,12 +6,13 @@ import ctypes
 from io import BytesIO
 import os
 from pathlib import Path
+import queue
 import subprocess
 import sys
 import tempfile
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import zipfile
 
 import game_save_installer
@@ -70,66 +71,131 @@ class Installer(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Install Black Ops Game Saves")
-        self.geometry("780x400")
-        self.minsize(720, 380)
+        self.geometry("780x470")
+        self.minsize(720, 430)
         self.resizable(True, True)
         self.configure(bg="#141414")
         self.installing = False
+        self.page = ""
         self.installed_app: Path | None = None
+        self.shortcut_done = False
+        found = game_save_installer.find_game()
+        self.folder = tk.StringVar(value=str(found) if found else "")
+        self.shortcut = tk.BooleanVar(value=True)
+        self.current_item = tk.StringVar(value="Preparing installation…")
+        self.progress_value = tk.DoubleVar(value=0)
+        self.events = queue.SimpleQueue()
         self.protocol("WM_DELETE_WINDOW", self.close)
         try:
             self.iconbitmap(str(resource("BlackOpsGameSaves.ico")))
         except tk.TclError:
             pass
-        tk.Label(self, text="BLACK OPS GAME SAVES", bg="#141414", fg="#eeeeee",
-                 font=("Segoe UI", 17, "bold")).pack(anchor="w", padx=24, pady=(24, 4))
-        tk.Label(self, text="One installer for the Game Save mod, game_mod loader, save manager, and map images.",
-                 bg="#141414", fg="#aaaaaa",
-                 font=("Segoe UI", 10)).pack(anchor="w", padx=24)
-        tk.Label(self, text="Black Ops game folder", bg="#141414", fg="#eeeeee",
-                 font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(22, 5))
-        row = tk.Frame(self, bg="#141414")
-        row.pack(fill="x", padx=24)
-        found = game_save_installer.find_game()
-        self.folder = tk.StringVar(value=str(found) if found else "")
+        self.show_welcome()
+
+    def _page(self, title: str, description: str):
+        for child in self.winfo_children():
+            child.destroy()
+        footer = tk.Frame(self, bg="#141414")
+        footer.pack(side="bottom", fill="x", padx=32, pady=24)
+        body = tk.Frame(self, bg="#141414")
+        body.pack(fill="both", expand=True, padx=32, pady=(34, 0))
+        tk.Label(body, text=title, bg="#141414", fg="#f4f4f4",
+                 font=("Segoe UI", 20, "bold")).pack(anchor="w", pady=(0, 12))
+        tk.Label(body, text=description, bg="#141414", fg="#bcbcbc",
+                 font=("Segoe UI", 11), wraplength=690, justify="left").pack(anchor="w")
+        return body, footer
+
+    @staticmethod
+    def _button(parent, text, command, *, primary=False):
+        return tk.Button(parent, text=text, command=command, relief="flat",
+                         bg="#e8e8e8" if primary else "#353535",
+                         fg="#111111" if primary else "#eeeeee",
+                         activebackground="#ffffff" if primary else "#505050",
+                         padx=20, pady=10, font=("Segoe UI", 10, "bold"))
+
+    def show_welcome(self):
+        self.page = "welcome"
+        body, footer = self._page("BLACK OPS GAME SAVES",
+                                  "Install the Game Save mod, game_mod loader, save manager, and Zombies map images from this one installer.")
+        tk.Label(body, text="The next page lets you choose your Black Ops folder.",
+                 bg="#141414", fg="#aaaaaa", font=("Segoe UI", 10)).pack(
+                     anchor="w", pady=(32, 0))
+        self.start_button = self._button(footer, "Install Game Save", self.show_location,
+                                         primary=True)
+        self.start_button.pack(side="left")
+        self.cancel_button = self._button(footer, "Cancel", self.close)
+        self.cancel_button.pack(side="right")
+
+    def show_location(self):
+        self.page = "location"
+        body, footer = self._page("Choose Black Ops folder",
+                                  "Use the folder containing BlackOps.exe. The installer will place files in the correct mod and game folders inside it.")
+        tk.Label(body, text="Game installation", bg="#141414", fg="#eeeeee",
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(32, 8))
+        row = tk.Frame(body, bg="#141414")
+        row.pack(fill="x")
         tk.Entry(row, textvariable=self.folder, bg="#242424", fg="#eeeeee",
                  insertbackground="#eeeeee", relief="flat", font=("Segoe UI", 10)).pack(
-                     side="left", fill="x", expand=True, ipady=7)
-        tk.Button(row, text="Browse…", command=self.browse, bg="#333333", fg="#eeeeee",
-                  relief="flat", padx=12, pady=7).pack(side="right", padx=(8, 0))
-        tk.Label(self, text="Install locations:  mods\\Game Save  •  bin  •  main  •  zone\\Common",
-                 bg="#141414", fg="#aaaaaa", font=("Segoe UI", 9)).pack(
-                     anchor="w", padx=24, pady=(8, 0))
-        self.status = tk.StringVar(value="Ready to install." if found else
-                                   "Choose the folder containing BlackOps.exe.")
-        tk.Label(self, textvariable=self.status, bg="#141414", fg="#aaaaaa",
-                 font=("Segoe UI", 9), wraplength=570, justify="left").pack(
-                     anchor="w", padx=24, pady=(15, 0))
-        self.shortcut = tk.BooleanVar(value=True)
-        tk.Checkbutton(self, text="Create a Desktop shortcut", variable=self.shortcut,
-                       bg="#141414", fg="#eeeeee", selectcolor="#242424",
-                       activebackground="#141414", activeforeground="#eeeeee",
-                       font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(8, 0))
-        row = tk.Frame(self, bg="#141414")
-        row.pack(fill="x", padx=24, pady=(28, 20))
-        self.install_button = tk.Button(row, text="Install Game Save", command=self.begin,
-                                        bg="#dddddd", fg="#111111", relief="flat",
-                                        padx=22, pady=10, font=("Segoe UI", 11, "bold"))
+                     side="left", fill="x", expand=True, ipady=9)
+        self._button(row, "Browse…", self.browse).pack(side="right", padx=(10, 0))
+        tk.Label(body, text="Example: D:\\Program Files (x86)\\Steam\\steamapps\\common\\Call of Duty Black Ops",
+                 bg="#141414", fg="#999999", font=("Segoe UI", 9),
+                 wraplength=690, justify="left").pack(anchor="w", pady=(14, 0))
+        tk.Label(body, text="Installs to mods\\Game Save, bin, main, and zone\\Common. Existing saves are kept.",
+                 bg="#141414", fg="#999999", font=("Segoe UI", 9)).pack(
+                     anchor="w", pady=(8, 0))
+        self.install_button = self._button(footer, "Install", self.begin, primary=True)
         self.install_button.pack(side="left")
-        self.run_button = tk.Button(row, text="Run now", command=self.run_installed,
-                                    bg="#333333", fg="#eeeeee", relief="flat",
-                                    padx=18, pady=10, state="disabled")
-        self.run_button.pack(side="left", padx=(12, 0))
-        self.close_button = tk.Button(row, text="Close", command=self.close,
-                                      bg="#333333", fg="#eeeeee", relief="flat",
-                                      padx=18, pady=8)
-        self.close_button.pack(side="right")
+        self.cancel_button = self._button(footer, "Cancel", self.close)
+        self.cancel_button.pack(side="right")
+
+    def show_progress(self):
+        self.page = "progress"
+        body, footer = self._page("Installing Game Save",
+                                  "Copying the mod, game_mod loader, save manager, and map images.")
+        self.bar = ttk.Progressbar(body, mode="determinate", maximum=100,
+                                   variable=self.progress_value)
+        self.bar.pack(fill="x", pady=(28, 12))
+        tk.Label(body, textvariable=self.current_item, bg="#141414", fg="#eeeeee",
+                 font=("Segoe UI", 10), wraplength=690, justify="left").pack(anchor="w")
+        self.items = tk.Text(body, height=8, bg="#202020", fg="#bbbbbb",
+                             relief="flat", font=("Consolas", 9), state="disabled")
+        self.items.pack(fill="both", expand=True, pady=(16, 8))
+        tk.Label(footer, text="Please wait until installation finishes.",
+                 bg="#141414", fg="#999999", font=("Segoe UI", 9)).pack(side="left")
+
+    def report(self, item: str, fraction: float):
+        self.events.put(("progress", item, fraction))
+
+    def drain_events(self):
+        while not self.events.empty():
+            event = self.events.get_nowait()
+            if event[0] == "progress":
+                self._report_ui(event[1], event[2])
+            elif event[0] == "complete":
+                self.finish(event[1])
+            elif event[0] == "error":
+                self.failed(event[1])
+        if self.installing:
+            self.after(40, self.drain_events)
+
+    def _report_ui(self, item: str, fraction: float):
+        if self.page != "progress":
+            return
+        self.progress_value.set(min(100, max(0, fraction * 100)))
+        self.current_item.set(item)
+        self.items.configure(state="normal")
+        self.items.insert("end", item + "\n")
+        self.items.see("end")
+        self.items.configure(state="disabled")
 
     def close(self):
         if self.installing:
             messagebox.showinfo("Installation in progress", "Wait for installation to finish before closing.",
                                 parent=self)
             return
+        if self.page == "complete":
+            self.apply_shortcut()
         self.destroy()
 
     def browse(self):
@@ -139,65 +205,89 @@ class Installer(tk.Tk):
             self.folder.set(chosen)
 
     def begin(self):
-        game = Path(self.folder.get().strip())
+        game = Path(self.folder.get().strip()).expanduser()
         if not (game / "BlackOps.exe").is_file():
             messagebox.showerror("Choose Black Ops", "Select the folder containing BlackOps.exe.", parent=self)
             return
         self.installing = True
         self.installed_app = None
-        self.install_button.configure(state="disabled")
-        self.run_button.configure(state="disabled")
-        self.close_button.configure(state="disabled")
-        self.status.set("Installing…")
-        create_shortcut = self.shortcut.get()
+        self.progress_value.set(0)
+        self.show_progress()
+        self.after(40, self.drain_events)
 
         def work():
             try:
+                self.report("Checking files embedded in the installer…", 0.02)
                 payload, manager, icon = verify_bundle()
-                with tempfile.TemporaryDirectory(prefix="bo1-game-save-") as directory:
+                staging_parent = game / "mods"
+                staging_parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.TemporaryDirectory(prefix=".game-save-install-",
+                                                 dir=staging_parent) as directory:
                     source = Path(directory)
+                    self.report("Extracting the mod and map images…", 0.06)
                     with zipfile.ZipFile(payload) as archive:
                         archive.extractall(source)
-                    result = game_save_installer.install_all(source, game, manager, icon)
-                destination = result["target"]
-                message = (f"Game Save mod and manager installed in {destination}. "
-                           f"Included {result['thumbnails']} map thumbnails.")
-                if create_shortcut:
-                    try:
-                        create_desktop_shortcut(destination / "BlackOpsGameSaves.exe",
-                                                destination / "BlackOpsGameSaves.ico")
-                        message += " Desktop shortcut created."
-                    except OSError as error:
-                        message += f" Desktop shortcut could not be created: {error}"
-                self.after(0, lambda: self.finish(message, destination / "BlackOpsGameSaves.exe"))
+                    self.report("Installing files into Black Ops…", 0.1)
+                    result = game_save_installer.install_all(
+                        source, game, manager, icon,
+                        progress=lambda item, fraction: self.report(item, 0.1 + 0.9 * fraction))
+                self.events.put(("complete", result))
             except Exception as error:
-                self.after(0, lambda error=error: self.failed(str(error)))
+                self.events.put(("error", str(error)))
         threading.Thread(target=work, daemon=False).start()
 
-    def finish(self, message: str, installed_app: Path):
+    def finish(self, result: dict):
         self.installing = False
-        self.installed_app = installed_app
-        self.install_button.configure(state="normal")
-        self.run_button.configure(state="normal")
-        self.close_button.configure(state="normal")
-        self.status.set("Installed successfully. " + message + " Click Run now to open the save manager.")
+        self.installed_app = result["target"] / "BlackOpsGameSaves.exe"
+        self.progress_value.set(100)
+        self.show_complete(result)
+
+    def show_complete(self, result: dict):
+        self.page = "complete"
+        body, footer = self._page("Installation complete",
+                                  "Game Save is ready. The mod, game_mod loader, save manager, and map images were installed.")
+        tk.Label(body, text=str(result["target"]), bg="#141414", fg="#dddddd",
+                 font=("Segoe UI", 10), wraplength=690, justify="left").pack(
+                     anchor="w", pady=(26, 8))
+        tk.Label(body, text=f"{result['thumbnails']} map thumbnails installed",
+                 bg="#141414", fg="#aaaaaa", font=("Segoe UI", 10)).pack(anchor="w")
+        tk.Checkbutton(body, text="Create a Desktop icon", variable=self.shortcut,
+                       bg="#141414", fg="#eeeeee", selectcolor="#242424",
+                       activebackground="#141414", activeforeground="#eeeeee",
+                       font=("Segoe UI", 11)).pack(anchor="w", pady=(32, 0))
+        self.run_button = self._button(footer, "Run Black Ops Game Saves", self.run_installed,
+                                        primary=True)
+        self.run_button.pack(side="left")
+        self.finish_button = self._button(footer, "Finish", self.close)
+        self.finish_button.pack(side="right")
+
+    def apply_shortcut(self):
+        if not self.shortcut.get() or self.shortcut_done or self.installed_app is None:
+            return
+        try:
+            create_desktop_shortcut(self.installed_app,
+                                    self.installed_app.parent / "BlackOpsGameSaves.ico")
+            self.shortcut_done = True
+        except OSError as error:
+            messagebox.showwarning("Desktop icon", f"The app installed, but its Desktop icon could not be created: {error}",
+                                   parent=self)
 
     def run_installed(self):
         if self.installed_app is None or not self.installed_app.is_file():
             messagebox.showerror("Run now", "Install the save manager first.", parent=self)
             return
+        self.apply_shortcut()
         try:
             subprocess.Popen([str(self.installed_app)], cwd=self.installed_app.parent)
         except OSError as error:
             messagebox.showerror("Run now", str(error), parent=self)
             return
+        self.page = "launched"
         self.destroy()
 
     def failed(self, message: str):
         self.installing = False
-        self.install_button.configure(state="normal")
-        self.close_button.configure(state="normal")
-        self.status.set("Installation failed.")
+        self.show_location()
         messagebox.showerror("Installation failed", message, parent=self)
 
 
@@ -210,9 +300,14 @@ def main():
     app = Installer()
     if "--smoke" in sys.argv:
         app.update()
+        if (app.start_button.winfo_rooty() + app.start_button.winfo_height() >
+                app.winfo_rooty() + app.winfo_height()):
+            raise RuntimeError("The first Install button is below the installer window")
+        app.show_location()
+        app.update()
         if (app.install_button.winfo_rooty() + app.install_button.winfo_height() >
                 app.winfo_rooty() + app.winfo_height()):
-            raise RuntimeError("The Install button is below the installer window")
+            raise RuntimeError("The folder page Install button is below the installer window")
         app.destroy()
     else:
         app.mainloop()
@@ -231,7 +326,9 @@ def create_desktop_shortcut(executable: Path, icon: Path):
     environment = os.environ.copy()
     environment.update(BO1_SAVE_APP=str(executable), BO1_SAVE_FOLDER=str(executable.parent),
                        BO1_SAVE_ICON=str(icon))
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-                            env=environment, capture_output=True, text=True, timeout=20)
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive",
+                             "-WindowStyle", "Hidden", "-Command", script],
+                            env=environment, capture_output=True, text=True, timeout=20,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if result.returncode:
         raise OSError(result.stderr.strip() or "Could not create the Desktop shortcut")

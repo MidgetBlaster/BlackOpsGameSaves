@@ -4,7 +4,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 from tempfile import TemporaryDirectory
+import time
 from unittest.mock import patch
 from zipfile import ZipFile
 
@@ -108,8 +110,14 @@ def test_complete_bundle_installs_artwork_and_manager():
                                                           manager, icon)
         digest = hashlib.sha256(executable.read_bytes()).hexdigest()
         with patch.object(core, "SUPPORTED_SHA256", digest):
-            result = install_all(source, game, manager, icon)
+            progress = []
+            result = install_all(source, game, manager, icon,
+                                 progress=lambda item, fraction: progress.append((item, fraction)))
             target = result["target"]
+            assert progress[-1] == ("mods/Game Save/BlackOpsGameSaves.ico", 1.0)
+            assert any("ui textures/png/" in item for item, _ in progress)
+            assert any(item == "bin/game_mod.dll" for item, _ in progress)
+            assert all(first[1] <= second[1] for first, second in zip(progress, progress[1:]))
             assert result["thumbnails"] == len(MAP_THUMBNAILS)
             assert (target / "BlackOpsGameSaves.exe").read_bytes() == b"packaged manager"
             assert (target / "BlackOpsGameSaves.ico").read_bytes() == icon.read_bytes()
@@ -137,20 +145,88 @@ def test_installer_run_now_after_completion():
         destroyed = False
         try:
             window.update()
-            assert window.install_button.cget("text") == "Install Game Save"
+            assert window.page == "welcome"
+            assert window.start_button.cget("text") == "Install Game Save"
+            assert window.cancel_button.cget("text") == "Cancel"
+            assert len(window.winfo_children()) == 2
+            window.show_location()
+            window.update()
+            assert window.page == "location"
+            assert window.install_button.cget("text") == "Install"
             assert window.shortcut.get() is True
-            assert window.run_button.cget("state") == "disabled"
             assert (window.install_button.winfo_rooty() + window.install_button.winfo_height()
                     <= window.winfo_rooty() + window.winfo_height())
-            window.finish("Files installed.", manager)
-            assert window.run_button.cget("state") == "normal"
-            with patch.object(installer_frontend.subprocess, "Popen") as launch:
+            window.show_progress()
+            window._report_ui("mods/Game Save/mod.ff", 0.5)
+            assert window.progress_value.get() == 50
+            window.finish({"target": manager.parent, "thumbnails": len(MAP_THUMBNAILS)})
+            assert window.page == "complete"
+            assert window.run_button.cget("text") == "Run Black Ops Game Saves"
+            with (patch.object(installer_frontend.subprocess, "Popen") as launch,
+                  patch.object(installer_frontend, "create_desktop_shortcut") as shortcut):
                 window.run_installed()
                 destroyed = True
+                shortcut.assert_called_once_with(manager, manager.parent / "BlackOpsGameSaves.ico")
                 launch.assert_called_once_with([str(manager)], cwd=manager.parent)
         finally:
             if not destroyed:
                 window.destroy()
+
+
+def test_wizard_installs_to_selected_game_folder():
+    import build_release
+    import installer_frontend
+
+    payload = build_release.payload_zip()
+    with TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+        root = Path(temporary)
+        game = root / "Selected Black Ops Folder"
+        game.mkdir()
+        executable = game / "BlackOps.exe"
+        executable.write_bytes(b"synthetic supported executable")
+        (root / "game_save_mod_payload.zip").write_bytes(payload.read_bytes())
+        (root / "BlackOpsGameSaves.exe").write_bytes(b"packaged manager")
+        (root / "BlackOpsGameSaves.ico").write_bytes(
+            (Path(__file__).parent / "BlackOpsGameSaves.ico").read_bytes())
+        digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+        with (patch.object(core, "SUPPORTED_SHA256", digest),
+              patch.object(installer_frontend, "resource", lambda name: root / name),
+              patch.object(game_save_installer, "find_game", return_value=None),
+              patch.object(installer_frontend.messagebox, "showerror") as errors):
+            window = installer_frontend.Installer()
+            try:
+                window.show_location()
+                window.folder.set(str(game))
+                window.begin()
+                deadline = time.monotonic() + 20
+                while window.page == "progress" and time.monotonic() < deadline:
+                    window.update()
+                    time.sleep(0.02)
+                assert window.page == "complete", (
+                    f"Installer stopped on {window.page}; error: {errors.call_args}")
+                target = game / "mods" / "Game Save"
+                assert (target / "BlackOpsGameSaves.exe").read_bytes() == b"packaged manager"
+                assert (target / "ui textures" / "png" / MAP_THUMBNAILS[0]).is_file()
+                assert (game / "bin" / "game_mod.dll").is_file()
+                assert window.progress_value.get() == 100
+                window.shortcut.set(False)
+            finally:
+                window.destroy()
+
+
+def test_desktop_shortcut_process_stays_hidden():
+    import installer_frontend
+
+    with patch.object(installer_frontend.subprocess, "run",
+                      return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+        installer_frontend.create_desktop_shortcut(
+            Path(r"C:\Games\Black Ops\mods\Game Save\BlackOpsGameSaves.exe"),
+            Path(r"C:\Games\Black Ops\mods\Game Save\BlackOpsGameSaves.ico"))
+    args, kwargs = run.call_args
+    assert args[0][:4] == ["powershell.exe", "-NoProfile", "-NonInteractive",
+                           "-WindowStyle"]
+    assert args[0][4] == "Hidden"
+    assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def test_unsupported_build_stops_before_installing():
@@ -174,5 +250,7 @@ if __name__ == "__main__":
     test_steam_library_discovery()
     test_complete_bundle_installs_artwork_and_manager()
     test_installer_run_now_after_completion()
+    test_wizard_installs_to_selected_game_folder()
+    test_desktop_shortcut_process_stays_hidden()
     test_unsupported_build_stops_before_installing()
     print("Game Save installation and reinstallation passed")

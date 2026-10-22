@@ -1,4 +1,12 @@
-# Black Ops Game Saves v1.0.9
+# Black Ops Game Saves v1.0.10
+
+- Adds a welcome page with Install Game Save and Cancel, followed by a game
+  folder page with Install and Cancel.
+- Shows live installation progress and the files being copied.
+- Moves the Desktop icon option and run button to the completion page.
+- Hides the PowerShell process used to create the Desktop shortcut.
+
+## v1.0.9
 
 - Makes the install action visible and labeled **Install Game Save** in a larger,
   resizable window.

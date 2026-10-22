@@ -158,7 +158,8 @@ def _merge_catalog(source: Path, destination: Path):
                                           ensure_ascii=False).encode("utf-8"))
 
 
-def install(source: Path, game: Path, package: Path | None = None) -> dict:
+def install(source: Path, game: Path, package: Path | None = None,
+            progress=None) -> dict:
     """Install without deleting an existing mod or overwriting saved games."""
     source = source.resolve()
     game = game.resolve()
@@ -186,32 +187,55 @@ def install(source: Path, game: Path, package: Path | None = None) -> dict:
         if not set(PACKAGE_FILES).issubset(archive.namelist()):
             raise ValueError("game_mod.zip is missing required loader files")
         runtime = {name: archive.read(name) for name in PACKAGE_FILES}
+    folder_files = [(folder, path) for folder in MOD_FOLDERS
+                    for path in (source / folder).rglob("*") if path.is_file()]
+    saves = source / "checkpoint_saves"
+    save_files = [path for path in saves.rglob("*") if path.is_file()
+                  and path.name != "catalog.json"] if saves.is_dir() else []
+    total_steps = (len(MOD_FILES) + len(folder_files) + 1 + len(save_files) +
+                   int((saves / "catalog.json").is_file()) + len(PACKAGE_FILES))
+    completed_steps = 0
+
+    def advance(item: str):
+        nonlocal completed_steps
+        completed_steps += 1
+        if progress:
+            progress(item, completed_steps / total_steps)
+
     target = game / "mods" / MOD_NAME
     target.mkdir(parents=True, exist_ok=True)
     updated_mod = 0
     for name in MOD_FILES:
         updated_mod += _copy_if_changed(source / name, target / name)
-    for folder in MOD_FOLDERS:
-        for path in (source / folder).rglob("*"):
-            if path.is_file():
-                updated_mod += _copy_if_changed(path, target / folder / path.relative_to(source / folder))
+        advance(f"mods/Game Save/{name}")
+    for folder, path in folder_files:
+        relative = Path(folder) / path.relative_to(source / folder)
+        updated_mod += _copy_if_changed(path, target / relative)
+        advance(f"mods/Game Save/{relative.as_posix()}")
     updated_mod += _copy_if_changed(iwd, target / "Game Save.iwd")
+    advance("mods/Game Save/Game Save.iwd")
     for name in MAP_THUMBNAILS:
         destination = target / "ui textures" / "png" / name
         if not destination.is_file():
             raise RuntimeError(f"Map thumbnail was not installed: {destination}")
-    saves = source / "checkpoint_saves"
     target_saves = target / "checkpoint_saves"
     copied_saves = 0
     if saves.is_dir() and saves.resolve() != target_saves.resolve():
-        for path in saves.rglob("*"):
-            if path.is_file() and path.name != "catalog.json":
-                destination = target_saves / path.relative_to(saves)
-                if not destination.exists():
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(path, destination)
-                    copied_saves += 1
+        for path in save_files:
+            destination = target_saves / path.relative_to(saves)
+            if not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, destination)
+                copied_saves += 1
+            advance(f"mods/Game Save/checkpoint_saves/{path.relative_to(saves).as_posix()}")
         _merge_catalog(saves / "catalog.json", target_saves / "catalog.json")
+        if (saves / "catalog.json").is_file():
+            advance("mods/Game Save/checkpoint_saves/catalog.json")
+    else:
+        for path in save_files:
+            advance(f"Keeping checkpoint: {path.name}")
+        if (saves / "catalog.json").is_file():
+            advance("Keeping checkpoint catalog")
     backup_root = target_saves / "install_backups" / datetime.now().strftime("%Y%m%d-%H%M%S")
     installed_runtime = []
     backed_up = []
@@ -220,6 +244,7 @@ def install(source: Path, game: Path, package: Path | None = None) -> dict:
         if destination.is_file():
             previous = destination.read_bytes()
             if previous == data:
+                advance(name)
                 continue
             backup = backup_root / name
             backup.parent.mkdir(parents=True, exist_ok=True)
@@ -227,22 +252,27 @@ def install(source: Path, game: Path, package: Path | None = None) -> dict:
             backed_up.append(name)
         _atomic_bytes(destination, data)
         installed_runtime.append(name)
+        advance(name)
     return {"target": target, "mod_files": updated_mod,
             "saves": copied_saves, "runtime_files": installed_runtime,
             "backups": backed_up, "thumbnails": len(MAP_THUMBNAILS)}
 
 
 def install_all(source: Path, game: Path, manager: Path, icon: Path,
-                package: Path | None = None) -> dict:
+                package: Path | None = None, progress=None) -> dict:
     """Install the mod, loader, artwork, and desktop manager together."""
     manager, icon = Path(manager), Path(icon)
     for asset in (manager, icon):
         if not asset.is_file():
             raise FileNotFoundError(f"The installer is missing a required app file: {asset}")
-    result = install(source, game, package)
+    result = install(source, game, package,
+                     progress=(lambda item, fraction: progress(item, fraction * 0.9))
+                     if progress else None)
     target = result["target"]
-    result["app_files"] = sum(
-        _copy_if_changed(asset, target / name)
-        for asset, name in ((manager, "BlackOpsGameSaves.exe"),
-                            (icon, "BlackOpsGameSaves.ico")))
+    result["app_files"] = 0
+    for index, (asset, name) in enumerate(((manager, "BlackOpsGameSaves.exe"),
+                                            (icon, "BlackOpsGameSaves.ico")), 1):
+        result["app_files"] += _copy_if_changed(asset, target / name)
+        if progress:
+            progress(f"mods/Game Save/{name}", 0.9 + index * 0.05)
     return result

@@ -1,10 +1,11 @@
 Black Ops Game Saves — Windows installer
 
-1. Run InstallBlackOpsGameSaves.exe and select the folder containing BlackOps.exe.
-2. Leave the Desktop shortcut option selected if you want a shortcut, then
-   click Install Game Save.
-3. When it finishes, click Run now, use the shortcut, or open
-   mods\Game Save\BlackOpsGameSaves.exe.
+1. Run InstallBlackOpsGameSaves.exe and click Install Game Save.
+2. Keep the detected game folder or Browse to the folder containing BlackOps.exe,
+   then click Install. Watch the file list and progress bar.
+3. When installation finishes, choose whether to create a Desktop icon. Click
+   Run Black Ops Game Saves or Finish. You can also open
+   mods\Game Save\BlackOpsGameSaves.exe later.
 
 This one installer carries the Game Save mod, loader, map thumbnails, save
 manager, and icon. You can send only this installer EXE to another user. It does
