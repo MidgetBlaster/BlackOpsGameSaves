@@ -58,7 +58,9 @@ The default End of Rounds setting prioritizes a checkpoint at each completed
 round. Round Transitions and Start of Round are alternative timing choices.
 If Continue is entered directly in the game, the manager detects the map
 clock restarting and resumes round tracking. Overwrite Game Saves updates
-the save selected in the manager; turn it off to keep new files.
+the save launched with Start Game, even if another row is selected later. A
+new game uses its first checkpoint as the overwrite target. Turn it off to
+keep separate files.
 Use **Export selected** or **Export all** to create a `.bo1gamesave` file and
 **Import saves** on another machine to add it to the Imported saves view.
 In a map's save list, hold Shift and click to select a range across pages, or
@@ -81,7 +83,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.18
+python package_release.py v1.0.19
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,

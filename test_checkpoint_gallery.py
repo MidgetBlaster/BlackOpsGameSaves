@@ -165,12 +165,18 @@ def test_recent_saves():
             assert canvas.bbox(last_weapon)[3] <= canvas.bbox("gallery-preview")[3]
             app.started_save_name = "kino-3"
             app.save_policy.set("Replace started save")
-            checkpoint = Path("new-auto.bo1checkpoint")
             with patch.object(app.library, "replace_save", create=True,
-                              return_value=entries["kino-4"]) as replace:
-                app.events.put(("saved", checkpoint, "auto", "imported", None))
+                              return_value=entries["kino-3"]) as replace, \
+                 patch.object(app.library, "register", create=True) as register:
+                app.events.put(("saved", Path("new-auto.bo1checkpoint"), "auto", "imported", None))
+                app.events.put(("saved", Path("new-manual.bo1checkpoint"), "manual", "imported", None))
                 app._poll_events()
-                replace.assert_called_once_with(checkpoint, "kino-4")
+                assert [call.args for call in replace.call_args_list] == [
+                    (Path("new-auto.bo1checkpoint"), "kino-3"),
+                    (Path("new-manual.bo1checkpoint"), "kino-3"),
+                ]
+                register.assert_not_called()
+                assert app.started_save_name == "kino-3"
             for number in range(5, 9):
                 entries[f"kino-{number}"] = {
                     "map": "zombie_theater", "round": number,

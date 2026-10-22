@@ -89,9 +89,9 @@ when missing or different, backing up any replaced files under
   F11. It does not make a rolling recovery checkpoint. An existing recovery
   file from an older session can still be imported when the window opens.
 - The **Overwrite Game Saves** button beside **Pause co-op** shows a green check
-  when new round or F11 checkpoints replace the save currently selected in
-  Mission Select. A red X
-  means those checkpoints are kept as separate saves. Its setting is saved
+  when new round or F11 checkpoints replace the save launched with Start Game.
+  Browsing another save does not change that target. A new game uses its first
+  checkpoint as the target. A red X keeps separate saves. The setting is saved
   between manager sessions.
 - **Auto Save Settings** cycles through End of Rounds, Round Transitions, and
   Start of Round. The watcher reads the Zombies round-end flag and round counter

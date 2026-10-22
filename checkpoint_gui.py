@@ -439,7 +439,7 @@ class CheckpointApp(tk.Tk):
         self.library.data["save_policy"] = self.save_policy.get()
         self.library.write()
         self._update_overwrite_button()
-        self.status.set("New checkpoints will overwrite the selected save." if
+        self.status.set("New checkpoints will overwrite the launched save." if
                         self.save_policy.get() == "Replace started save" else
                         "New checkpoints will be kept as separate saves.")
 
@@ -1548,32 +1548,37 @@ class CheckpointApp(tk.Tk):
                 if kind == "saved":
                     _, path, save_kind, profile_id, title = event
                     try:
-                        overwrite_target = self.selected_name() or self.started_save_name
+                        overwrite_enabled = self.save_policy.get() == "Replace started save"
+                        overwrite_target = (self.started_save_name or self.selected_name()
+                                            if overwrite_enabled else None)
                         overwrite_error = None
-                        if (overwrite_target and
-                                self.save_policy.get() == "Replace started save"):
+                        if overwrite_target:
                             try:
                                 details = self.library.replace_save(path, overwrite_target)
                                 self.started_save_name = overwrite_target
                             except (FileNotFoundError, ValueError) as error:
                                 details = self.library.register(path, kind=save_kind,
                                                                 profile_id=profile_id, title=title)
+                                self.started_save_name = path.name
                                 overwrite_error = str(error)
                         else:
                             details = self.library.register(path, kind=save_kind,
                                                             profile_id=profile_id, title=title)
+                            if overwrite_enabled:
+                                self.started_save_name = path.name
                         if details["round"] != self.skip_initial_round:
                             self.skip_initial_round = None
                         self.refresh()
                         when = datetime.fromisoformat(details["saved_at"]).strftime("%I:%M %p")
                         if overwrite_error:
                             self.status.set(f"Could not overwrite {overwrite_target}: {overwrite_error}. "
-                                            "The checkpoint was kept as a new save.")
-                        elif self.save_policy.get() != "Replace started save" or overwrite_target:
+                                            "The new checkpoint is now the overwrite target.")
+                        elif overwrite_target:
+                            self.status.set(f"Overwrote {details['title']} at {when}.")
+                        elif not overwrite_enabled:
                             self.status.set(f"Saved {details['map']} at {when}.")
                         else:
-                            self.status.set("No save was selected to overwrite; "
-                                            f"kept a new {details['map']} checkpoint at {when}.")
+                            self.status.set(f"Started overwriting {details['title']} at {when}.")
                     except Exception as error:
                         messagebox.showerror("Save catalog error", str(error), parent=self)
                 elif kind == "watch_error":

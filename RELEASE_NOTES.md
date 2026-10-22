@@ -1,4 +1,11 @@
-# Black Ops Game Saves v1.0.18
+# Black Ops Game Saves v1.0.19
+
+- Overwrite Game Saves now keeps the launched checkpoint as the target for
+  every automatic and manual checkpoint, even after browsing another save.
+  A new game uses its first checkpoint as the target when overwrite is on.
+  Repeated replacements keep the same file, title, and favorite state.
+
+## v1.0.18
 
 - Keeps Shift+A scoped to the selected map. Selected-save deletion now names
   that map in the confirmation. Reinstalling the mod no longer brings back

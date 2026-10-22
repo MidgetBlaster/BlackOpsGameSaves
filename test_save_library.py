@@ -80,8 +80,18 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directo
         assert reopened.data["saves"][save.name]["title"] == "High round attempt"
         assert reopened.data["saves"][save.name]["favorite"] is True
         assert "players" not in reopened.data["saves"][save.name]
+        again = archive / "new-round-006.bo1checkpoint"
+        with zipfile.ZipFile(again, "w") as file:
+            file.writestr("manifest.json", json.dumps({
+                "format": 1, "map": "zombie_cod5_factory", "round": 6,
+                "saved_at": "2026-10-20T05:06:00-04:00"}))
+        reopened.replace_save(again, save.name)
+        assert not again.exists()
+        assert set(reopened.data["saves"]) == {save.name}
+        assert set(archive.glob("*.bo1checkpoint")) == {save}
+        assert reopened.data["saves"][save.name]["round"] == 6
         recovered = lib.SaveLibrary(archive / "catalog.json")
-        assert recovered.data["saves"][save.name]["round"] == 5
+        assert recovered.data["saves"][save.name]["round"] == 6
         assert recovered.data["saves"][save.name]["favorite"] is True
         reopened.delete_save(save.name)
         assert not save.exists() and not reopened.data["saves"]
