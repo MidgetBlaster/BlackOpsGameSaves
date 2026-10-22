@@ -150,7 +150,7 @@ class CheckpointApp(tk.Tk):
         self.fov_value = tk.StringVar(value=f"{fov:g}")
         self.fov_scale = tk.StringVar(value=f"{scale:.2f}")
         self.fov_settings = (self.fov_enabled, fov, scale)
-        self.speed_fix_enabled = bool(self.library.data.get("speed_fix_enabled", False))
+        self.speed_fix_enabled = bool(self.library.data.get("speed_fix_enabled", True))
         self._write_speed_config()
         self.category = tk.StringVar(value="All saves")
         self.search = tk.StringVar()
@@ -239,7 +239,6 @@ class CheckpointApp(tk.Tk):
         self.gallery_canvas = tk.Canvas(self.gallery_page, bg=BG, highlightthickness=0, bd=0)
         self.gallery_canvas.pack(fill="both", expand=True)
         self.gallery_canvas.bind("<Configure>", lambda _event: self._render_gallery())
-        self._bind_wheel(self.gallery_canvas, self._scroll_gallery)
         self.heading.pack_forget()  # Mission Select is drawn on the lobby artwork.
 
         self.saves_page = ttk.Frame(outer)
@@ -386,10 +385,6 @@ class CheckpointApp(tk.Tk):
         if getattr(event, "num", None) == 5:
             return 1
         return -int(event.delta / 120) if getattr(event, "delta", 0) else 0
-
-    def _scroll_gallery(self, event):
-        self.gallery_canvas.yview_scroll(self._wheel_steps(event), "units")
-        return "break"
 
     def _scroll_saves(self, event):
         self.tree.yview_scroll(self._wheel_steps(event), "units")
@@ -699,10 +694,10 @@ class CheckpointApp(tk.Tk):
 
     def _render_gallery(self):
         canvas = self.gallery_canvas
-        previous_scroll = canvas.yview()[0]
         canvas.delete("all")
         width = max(canvas.winfo_width(), 1000)
-        height = max(canvas.winfo_height(), 520)
+        height = canvas.winfo_height()
+        compact = height < 575
         if self.background_image is not None:
             canvas.create_image(width // 2, -130, image=self.background_image, anchor="n")
         canvas.create_text(34, 36, text="MISSION SELECT", anchor="w", fill="#f7f3f2",
@@ -724,8 +719,8 @@ class CheckpointApp(tk.Tk):
 
         left_x = 28
         left_width = min(435, int(width * 0.38))
-        row_top = 113
-        row_height = 38
+        row_top = 90 if compact else 113
+        row_height = min(38, max(18, (height - row_top - 8) // max(len(maps), 1)))
         if not maps:
             canvas.create_text(left_x + 12, row_top + 12, text="NO MAP SAVES FOUND",
                                anchor="w", fill=TEXT, font=("Arial Narrow", 16, "bold"))
@@ -742,7 +737,8 @@ class CheckpointApp(tk.Tk):
             text = canvas.create_text(left_x + 18, y + (row_height - 2) // 2,
                                       text=title, anchor="w",
                                       fill="#0d0d0d" if selected else "#f1eeee",
-                                      font=("Arial Narrow", 17, "bold"), tags=(tag,))
+                                      font=("Arial Narrow", 14 if row_height < 30 else 17, "bold"),
+                                      tags=(tag,))
             self.gallery_rows[map_name] = (rectangle, text)
             canvas.tag_bind(tag, "<Enter>", lambda _event, key=map_name:
                             self._highlight_gallery_row(key, True))
@@ -758,7 +754,8 @@ class CheckpointApp(tk.Tk):
             right_x = left_x + left_width + 52
             right_width = width - right_x - 25
             center_x = right_x + right_width // 2
-            canvas.create_text(center_x, 111, text=map_title(selected).upper(),
+            canvas.create_text(center_x, 91 if compact else 111,
+                               text=map_title(selected).upper(),
                                fill="#f7f3f2", font=("Arial Narrow", 22, "bold"))
             art_name = MAP_ART.get(selected, ("", None))[1]
             preview = None
@@ -769,9 +766,16 @@ class CheckpointApp(tk.Tk):
                         path = core.ROOT / "ui textures" / "previews" / f"{art_name}.png"
                         self.map_images[key] = tk.PhotoImage(file=str(path))
                     preview = self.map_images[key]
+                    if compact:
+                        compact_key = f"compact:{art_name}"
+                        if compact_key not in self.map_images:
+                            self.map_images[compact_key] = preview.zoom(4, 4).subsample(5, 5)
+                        preview = self.map_images[compact_key]
                 except tk.TclError:
                     pass
-            image_top = 137
+            image_top = 112 if compact else 137
+            preview_width = preview.width() if preview is not None else (352 if compact else 440)
+            preview_height = preview.height() if preview is not None else (200 if compact else 250)
             if preview is not None:
                 image_id = canvas.create_image(center_x, image_top, image=preview,
                                                anchor="n", tags=("gallery-preview",))
@@ -782,12 +786,15 @@ class CheckpointApp(tk.Tk):
                 canvas.tag_bind(image_id, "<Leave>",
                                 lambda _event: canvas.configure(cursor=""))
             else:
-                canvas.create_rectangle(center_x - 220, image_top, center_x + 220,
-                                        image_top + 250, fill="#21090a", outline="#673237")
-                canvas.create_text(center_x, image_top + 125, text="MAP IMAGE UNAVAILABLE",
+                canvas.create_rectangle(center_x - preview_width // 2, image_top,
+                                        center_x + preview_width // 2,
+                                        image_top + preview_height,
+                                        fill="#21090a", outline="#673237")
+                canvas.create_text(center_x, image_top + preview_height // 2,
+                                   text="MAP IMAGE UNAVAILABLE",
                                    fill=MUTED, font=("Arial Narrow", 15, "bold"))
 
-            section_y = 400
+            section_y = image_top + preview_height + (10 if compact else 13)
             canvas.create_text(right_x, section_y, text="RECENT SAVES", anchor="w",
                                fill=TEXT, font=("Arial Narrow", 15, "bold"))
             count = counts.get(selected, 0)
@@ -802,14 +809,15 @@ class CheckpointApp(tk.Tk):
                 canvas.create_text(right_x, section_y + 42, text="No saved checkpoints for this map yet.",
                                    anchor="w", fill=MUTED, font=("Segoe UI", 11))
             for index, (name, entry) in enumerate(recent):
-                y = section_y + 22 + index * 51
+                y = section_y + 22 + index * (46 if compact else 51)
                 tag = f"gallery-save-{index}"
-                canvas.create_rectangle(right_x, y, right_x + right_width, y + 47,
+                canvas.create_rectangle(right_x, y, right_x + right_width,
+                                        y + (42 if compact else 47),
                                         fill="#23090c", outline="#683036", tags=(tag,))
-                canvas.create_text(right_x + 13, y + 14,
+                canvas.create_text(right_x + 13, y + (12 if compact else 14),
                                    text=entry.get("title") or "Save Game", anchor="w",
                                    fill=TEXT, font=("Segoe UI", 10, "bold"), tags=(tag,))
-                canvas.create_text(right_x + 13, y + 34,
+                canvas.create_text(right_x + 13, y + (30 if compact else 34),
                                    text=f"Round {entry.get('round', '?')}  ·  {save_date(entry.get('saved_at', ''))}",
                                    anchor="w", fill=MUTED, font=("Segoe UI", 9), tags=(tag,))
                 canvas.tag_bind(tag, "<Button-1>",
@@ -818,8 +826,6 @@ class CheckpointApp(tk.Tk):
                                 lambda _event: canvas.configure(cursor="hand2"))
                 canvas.tag_bind(tag, "<Leave>",
                                 lambda _event: canvas.configure(cursor=""))
-        canvas.configure(scrollregion=(0, 0, width, max(height, 615)))
-        canvas.yview_moveto(previous_scroll)
 
     def _highlight_gallery_row(self, map_name: str, highlighted: bool):
         row = self.gallery_rows.get(map_name)

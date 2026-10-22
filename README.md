@@ -25,9 +25,12 @@ EXE is needed on another machine; all required files are embedded. Personal chec
 are never included in the installer, and existing checkpoints are retained.
 The map screen stretches the Zombies lobby frame vertically, shows maps in rows on the left,
 and previews the selected map, its three newest saves, and its total save count
-on the right.
+on the right. The full map list fits without scrolling, including at the
+manager's minimum window size.
 The **Backspeed/strafe fix** button beside FoV remembers its setting. New Game Save
-sessions apply equal backward and strafe speed to every player through GSC.
+sessions start with the fix enabled and apply equal backward and strafe speed
+to every player through GSC. Turning it off stays in effect when the manager
+is reopened until the button is turned on again.
 Older checkpoint sessions can apply the toggle to the local player without
 changing the checkpoint scripts.
 New checkpoints also record which script variant they use. On Continue, the
@@ -60,7 +63,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.12
+python package_release.py v1.0.13
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,
@@ -86,7 +89,7 @@ Push the prepared branch and release tag with:
 
 ```powershell
 git push -u origin main
-git push origin v1.0.12
+git push origin v1.0.13
 ```
 
 The tag push starts the Windows release workflow. The local release package is

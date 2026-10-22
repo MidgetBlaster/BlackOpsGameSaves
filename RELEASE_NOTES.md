@@ -1,4 +1,11 @@
-# Black Ops Game Saves v1.0.12
+# Black Ops Game Saves v1.0.13
+
+- Fits the entire map selection and three recent saves in the window without
+  scrolling, including at the minimum window size.
+- Enables Backspeed/strafe fix by default for new settings. An explicit off
+  choice stays off after the manager or game closes until it is turned on again.
+
+## v1.0.12
 
 - Stretches the lobby artwork vertically and places Mission Select in its top
   band, with map rows and preview aligned below it.

@@ -1,6 +1,8 @@
 """Check the mission-select layout and its three-save preview."""
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import checkpoint_gui as gui
@@ -51,7 +53,7 @@ def test_recent_saves():
         try:
             app.update()
             assert "Backspeed/strafe fix" in app.speed_button.cget("text")
-            assert app.speed_button.cget("fg") == "#f07575"
+            assert app.speed_button.cget("fg") == "#6dda82"
             assert app.gallery_selected_map == "zombie_theater"
             assert len(app.gallery_rows) == len(gui.MAP_ART)
             canvas = app.gallery_canvas
@@ -59,6 +61,13 @@ def test_recent_saves():
             assert canvas.bbox("gallery-map-10")[3] <= canvas.winfo_height()
             assert canvas.bbox("gallery-save-2")[3] <= canvas.winfo_height(), (
                 canvas.bbox("gallery-save-2"), canvas.winfo_height())
+            app.geometry("1010x700")
+            app.update()
+            assert canvas.bbox("gallery-map-10")[3] <= canvas.winfo_height()
+            assert canvas.bbox("gallery-save-2")[3] <= canvas.winfo_height(), (
+                canvas.bbox("gallery-save-2"), canvas.winfo_height())
+            assert not canvas.cget("scrollregion")
+            assert not canvas.bind("<MouseWheel>")
             texts = [canvas.itemcget(item, "text") for item in canvas.find_all()
                      if canvas.type(item) == "text"]
             assert any(text.startswith("4 SAVES TOTAL") for text in texts)
@@ -81,6 +90,50 @@ def test_recent_saves():
             app.destroy()
 
 
+def test_speed_fix_remembers_off():
+    class Library:
+        catalog = {"saves": {}, "profiles": [], "active_profile": None}
+
+        def __init__(self):
+            self.data = self.catalog
+
+        def scan(self):
+            pass
+
+        def profiles(self):
+            return []
+
+        def write(self):
+            pass
+
+    with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+        with (patch.object(gui, "SaveLibrary", Library),
+              patch.object(gui.core, "ROOT", Path(directory)),
+              patch.object(gui.core, "promote_recovery", return_value=None),
+              patch.object(gui.core, "game_pid", return_value=None),
+              patch.object(gui.game_launcher, "prepare_script_variant"),
+              patch.object(gui.CheckpointApp, "_start_watch"),
+              patch.object(gui.CheckpointApp, "_fov_loop")):
+            first = gui.CheckpointApp()
+            try:
+                assert first.speed_fix_enabled
+                assert (Path(directory) / "checkpoint_speed.cfg").read_text() == (
+                    "set checkpoint_speed_fix 1\n")
+                first.toggle_speed_fix()
+                assert first.library.data["speed_fix_enabled"] is False
+            finally:
+                first.destroy()
+            reopened = gui.CheckpointApp()
+            try:
+                assert not reopened.speed_fix_enabled
+                assert reopened.speed_button.cget("fg") == "#f07575"
+                assert (Path(directory) / "checkpoint_speed.cfg").read_text() == (
+                    "set checkpoint_speed_fix 0\n")
+            finally:
+                reopened.destroy()
+
+
 if __name__ == "__main__":
     test_recent_saves()
+    test_speed_fix_remembers_off()
     print("Mission-select layout and recent saves passed")
