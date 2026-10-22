@@ -232,7 +232,10 @@ def install(source: Path, game: Path, package: Path | None = None,
             raise RuntimeError(f"Map artwork was not installed: {destination}")
     target_saves = target / "checkpoint_saves"
     copied_saves = 0
-    if saves.is_dir() and saves.resolve() != target_saves.resolve():
+    # Import checkpoints from the previous mod only on the first install.
+    # Reinstalling must not resurrect saves deleted from the active catalog.
+    first_save_install = not (target_saves / "catalog.json").is_file()
+    if first_save_install and saves.is_dir() and saves.resolve() != target_saves.resolve():
         for path in save_files:
             destination = target_saves / path.relative_to(saves)
             if not destination.exists():

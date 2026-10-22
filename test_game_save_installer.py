@@ -65,12 +65,16 @@ def test_install():
             (target / "checkpoint_saves" / "new.bo1checkpoint").write_bytes(b"new checkpoint")
             installed_catalog = json.loads((target / "checkpoint_saves" / "catalog.json").read_text())
             installed_catalog["saves"]["new.bo1checkpoint"] = {"title": "New save"}
+            (target / "checkpoint_saves" / "old.bo1checkpoint").unlink()
+            del installed_catalog["saves"]["old.bo1checkpoint"]
             (target / "checkpoint_saves" / "catalog.json").write_text(json.dumps(installed_catalog))
             second = install(source, game, package)
             assert not second["runtime_files"]
+            assert second["saves"] == 0
+            assert not (target / "checkpoint_saves" / "old.bo1checkpoint").exists()
             assert (target / "checkpoint_saves" / "new.bo1checkpoint").read_bytes() == b"new checkpoint"
             merged = json.loads((target / "checkpoint_saves" / "catalog.json").read_text())
-            assert set(merged["saves"]) == {"old.bo1checkpoint", "new.bo1checkpoint"}
+            assert set(merged["saves"]) == {"new.bo1checkpoint"}
 
 
 def test_steam_library_discovery():

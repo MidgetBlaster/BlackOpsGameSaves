@@ -1,14 +1,17 @@
 """Check the mission-select layout and its three-save preview."""
 
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import checkpoint_gui as gui
+import save_library
 import tkinter as tk
 import tkinter.font as tkfont
+from zipfile import ZipFile
 
 
 def test_recent_saves():
@@ -225,7 +228,7 @@ def test_recent_saves():
                 raise AssertionError("The manager stayed open after Close")
         finally:
             if not app.closing:
-                app.destroy()
+                app.close()
 
 
 def test_speed_fix_remembers_off():
@@ -268,10 +271,62 @@ def test_speed_fix_remembers_off():
                 assert (Path(directory) / "checkpoint_speed.cfg").read_text() == (
                     "set checkpoint_speed_fix 0\n")
             finally:
-                reopened.destroy()
+                reopened.close()
+
+
+def test_delete_map_saves_updates_recent_rows():
+    with TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+        root = Path(temporary)
+        archive = root / "checkpoint_saves"
+        archive.mkdir()
+        for map_name, number in [("zombie_theater", number) for number in range(1, 8)] + [
+                ("zombie_cod5_factory", 1)]:
+            path = archive / f"{map_name}-round-{number:03d}.bo1checkpoint"
+            with ZipFile(path, "w") as checkpoint:
+                checkpoint.writestr("manifest.json", json.dumps({
+                    "format": 1, "map": map_name, "round": number,
+                    "saved_at": f"2026-10-22T05:{number:02d}:00-04:00",
+                }))
+        prompts = []
+
+        def confirm(_title, prompt, **_kwargs):
+            prompts.append(prompt)
+            return True
+
+        with (patch.object(save_library, "ARCHIVE", archive),
+              patch.object(gui, "SaveLibrary", lambda: save_library.SaveLibrary(archive / "catalog.json")),
+              patch.object(gui.core, "ROOT", root),
+              patch.object(gui.core, "promote_recovery", return_value=None),
+              patch.object(gui.core, "game_pid", return_value=None),
+              patch.object(gui.game_launcher, "prepare_script_variant"),
+              patch.object(gui.CheckpointApp, "_start_watch"),
+              patch.object(gui.CheckpointApp, "_fov_loop"),
+              patch.object(gui.messagebox, "askyesno", side_effect=confirm)):
+            app = gui.CheckpointApp()
+            try:
+                app.update()
+                app._select_gallery_map("zombie_theater")
+                app._select_all_gallery_saves()
+                assert len(app.selected_names()) == 7
+                app._change_gallery_page(2)
+                assert len(app.gallery_visible_saves) == 1
+                app.delete_save()
+                assert len(list(archive.glob("*.bo1checkpoint"))) == 1
+                assert set(app.library.data["saves"]) == {
+                    "zombie_cod5_factory-round-001.bo1checkpoint"}
+                assert app.gallery_selected_map == "zombie_theater"
+                assert app.gallery_visible_saves == []
+                texts = [app.gallery_canvas.itemcget(item, "text")
+                         for item in app.gallery_canvas.find_all()
+                         if app.gallery_canvas.type(item) == "text"]
+                assert "0 SAVES TOTAL" in texts
+                assert "Kino der Toten" in prompts[0]
+            finally:
+                app.close()
 
 
 if __name__ == "__main__":
     test_recent_saves()
     test_speed_fix_remembers_off()
+    test_delete_map_saves_updates_recent_rows()
     print("Mission-select layout and recent saves passed")

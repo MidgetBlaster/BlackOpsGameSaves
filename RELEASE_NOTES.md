@@ -1,4 +1,10 @@
-# Black Ops Game Saves v1.0.17
+# Black Ops Game Saves v1.0.18
+
+- Keeps Shift+A scoped to the selected map. Selected-save deletion now names
+  that map in the confirmation. Reinstalling the mod no longer brings back
+  checkpoints previously deleted from the active save folder.
+
+## v1.0.17
 
 - Shift-click selects the full save range across pages on the selected map.
   Shift+A selects every save on that map in the current view. Ctrl-click and

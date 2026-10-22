@@ -1295,25 +1295,30 @@ class CheckpointApp(tk.Tk):
             messagebox.showinfo("Select a save", "Select one or more saves first.", parent=self)
             return
         title = self.library.data["saves"][names[0]]["title"]
-        prompt = (f"Permanently delete {len(names)} selected saves?" if len(names) > 1 else
+        map_name = self.library.data["saves"][names[0]].get("map", "")
+        prompt = (f"Permanently delete {len(names)} selected saves from {map_title(map_name)}?"
+                  if len(names) > 1 else
                   f"Permanently delete ‘{title}’?")
         if messagebox.askyesno("Delete saves", prompt, parent=self):
-            errors = []
-            deleted = 0
-            for name in names:
-                try:
-                    self.library.delete_save(name)
-                except OSError as error:
-                    errors.append(f"{name}: {error}")
-                    continue
-                deleted += 1
-                if self.started_save_name == name:
-                    self.started_save_name = None
-            self.refresh()
-            if deleted:
-                self.status.set(f"Deleted {deleted} save{'s' if deleted != 1 else ''}.")
-            if errors:
-                messagebox.showerror("Delete failed", "Could not delete:\n" + "\n".join(errors), parent=self)
+            self._delete_names(names)
+
+    def _delete_names(self, names: list[str]):
+        errors = []
+        deleted = 0
+        for name in names:
+            try:
+                self.library.delete_save(name)
+            except OSError as error:
+                errors.append(f"{name}: {error}")
+                continue
+            deleted += 1
+            if self.started_save_name == name:
+                self.started_save_name = None
+        self.refresh()
+        if deleted:
+            self.status.set(f"Deleted {deleted} save{'s' if deleted != 1 else ''}.")
+        if errors:
+            messagebox.showerror("Delete failed", "Could not delete:\n" + "\n".join(errors), parent=self)
 
     def _mode_for_save(self, entry: dict) -> str | None:
         mode = entry.get("saved_mode") or self.library.profile(entry["profile_id"])["mode"]
@@ -1710,6 +1715,8 @@ class CheckpointApp(tk.Tk):
             self.after(100, self._finish_close)
             return
         target = self.launch_after_close
+        for callback_id in self.tk.call("after", "info"):
+            self.after_cancel(callback_id)
         self.destroy()
         if target is not None:
             installed_exe = target / "BlackOpsGameSaves.exe"
