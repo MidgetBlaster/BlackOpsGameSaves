@@ -31,6 +31,10 @@ class FakeGame:
 
 def test_apply():
     game = FakeGame()
+    game.executable_verified = False
+    assert not apply_fov(game, 90, 1.25)
+    assert not game.writes
+    game.executable_verified = True
     game.layout_confirmed = False
     with patch.object(core, "probe_live_save_layout", side_effect=[False, True]):
         assert not apply_fov(game, 90, 1.25)

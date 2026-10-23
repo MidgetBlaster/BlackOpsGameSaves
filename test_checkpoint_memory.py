@@ -106,6 +106,9 @@ class FakeGame:
         yield
 
 game = FakeGame()
+game.executable_verified = False
+assert c.SaveQueueUnblocker().observe(game, 0) is False
+game.executable_verified = True
 assert c.probe_live_save_layout(game) is True
 game.write(c.COMMITTED_PTR, struct.pack('<II', 0, 0))
 assert c.probe_live_save_layout(game) is False

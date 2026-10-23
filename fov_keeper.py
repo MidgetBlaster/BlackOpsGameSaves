@@ -37,6 +37,8 @@ def _value_address(game: core.GameProcess, pointer_location: int) -> int | None:
 def apply_fov(game: core.GameProcess, fov: float, scale: float) -> bool:
     """Write only plausible, live FoV dvars in the verified SP process."""
     fov, scale = validate_settings(fov, scale)
+    if not getattr(game, "executable_verified", True):
+        return False
     if not getattr(game, "layout_confirmed", True):
         try:
             game.layout_confirmed = core.probe_live_save_layout(game)

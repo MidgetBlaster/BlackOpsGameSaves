@@ -1,4 +1,10 @@
-# Black Ops Game Saves v1.0.20
+# Black Ops Game Saves v1.0.21
+
+- Keeps FoV writes and the stalled-save-queue repair disabled on an untested
+  executable. These features use addresses separate from the checkpoint
+  buffers and require a verified build.
+
+## v1.0.20
 
 - The installer now installs the complete mod and app for an untested
   BlackOps.exe instead of stopping before copying files. It shows the game

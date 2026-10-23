@@ -77,6 +77,8 @@ buffer header, and map identity before permitting memory writes. A compatible
 live layout can be used after the first committed checkpoint. If those
 addresses differ, saving and restore remain disabled until that build is
 profiled. Installer or manager hashes cannot identify a game build.
+FoV memory writes and the stalled-save-queue repair stay disabled on an
+untested executable because those features use separate addresses.
 Co-op restore still needs a live test with the same host and players. See
 [CHECKPOINTS.md](CHECKPOINTS.md) for usage details and current limits.
 
@@ -87,7 +89,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.20
+python package_release.py v1.0.21
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,

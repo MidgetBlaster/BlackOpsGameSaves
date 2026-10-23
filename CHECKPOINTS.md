@@ -18,6 +18,8 @@ committed checkpoint header without writing memory. It permits memory writes
 only after that live layout is verified. A build with different addresses
 still needs its own profile; the installer cannot derive those addresses from
 the hash of itself or the save manager.
+FoV writes and the stalled-save-queue repair stay off on an untested build
+because their addresses are independent of the save buffer layout.
 This is a process-memory tool for the retail game, not a build of the
 decompiled executable. It never uses `players/save/*.svg`.
 

@@ -229,10 +229,12 @@ class GameProcess:
             if executable.name.lower() != "blackops.exe":
                 raise RuntimeError(f"Unsupported process: {executable.name}")
             self.layout_confirmed = True
+            self.executable_verified = True
             self.compatibility_error = None
             try:
                 verify_game_executable(executable)
             except RuntimeError as error:
+                self.executable_verified = False
                 self.layout_confirmed = False
                 self.compatibility_error = str(error)
             if self.read(BASE, 2) != b"MZ":
@@ -750,6 +752,8 @@ class SaveQueueUnblocker:
         self.first_frame = None
 
     def observe(self, game: GameProcess, now: float) -> bool:
+        if not getattr(game, "executable_verified", True):
+            return False
         count = game.u32(SAVE_QUEUE_COUNT)
         pointer = game.u32(ASYNC_DISK_SAVE)
         if not 0 < count <= 3 or pointer not in BUFFERS:
