@@ -1,4 +1,14 @@
-# Black Ops Game Saves v1.0.22
+# Black Ops Game Saves v1.0.23
+
+- Installation creates `memory_profile.json` for the selected BlackOps.exe,
+  recording its hash and the addresses derived from its PE data section.
+  The tested executable is verified immediately. Other builds get a candidate
+  profile that must pass a read-only check against a live checkpoint.
+- Supports a whole-data-section address shift when the live checkpoint
+  confirms the candidate. Saves record their source profile; loading across
+  different address profiles remains blocked.
+
+## v1.0.22
 
 - The installer now lets users browse directly to their own BlackOps.exe.
   It installs beside that selected executable and reports its build hash when

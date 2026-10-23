@@ -29,6 +29,8 @@ after an in-game Continue. New checkpoints record the map's power-on state
 for restoration during Continue; older checkpoints keep their original script.
 
 The installer also copies files for an untested BlackOps.exe and shows that
-game executable's SHA-256 and size. The manager checks the running save layout
-before writing memory. A build with different memory addresses still needs a
-matching profile. Existing checkpoints are retained when installing again.
+game executable's SHA-256 and size. It records an address profile derived from
+the selected executable's PE data section. The manager confirms a candidate
+against a live checkpoint before writing memory. A build with changed internal
+data layout still needs a separately verified profile. Existing checkpoints
+are retained when installing again.

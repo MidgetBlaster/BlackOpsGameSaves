@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -174,15 +173,10 @@ def install(source: Path, game: Path, package: Path | None = None,
     executable = game / "BlackOps.exe"
     if not executable.is_file():
         raise FileNotFoundError(f"BlackOps.exe was not found in {game}")
-    executable_size = executable.stat().st_size
-    executable_sha256 = hashlib.sha256(executable.read_bytes()).hexdigest()
-    # Installing files is safe even when this BlackOps.exe has not yet been
-    # profiled. Memory access is checked separately when the game is running.
-    try:
-        core.verify_game_executable(executable)
-        compatibility = "tested"
-    except RuntimeError:
-        compatibility = "unverified"
+    profile = core.memory_profile(executable)
+    executable_size = profile["size"]
+    executable_sha256 = profile["executable_sha256"]
+    compatibility = "tested" if profile["status"] == "verified_file" else "unverified"
     package = package or source / "installer" / "game_mod.zip"
     if not package.is_file():
         raise FileNotFoundError(f"The bundled game_mod.zip is missing: {package}")
@@ -209,7 +203,7 @@ def install(source: Path, game: Path, package: Path | None = None,
     saves = source / "checkpoint_saves"
     save_files = [path for path in saves.rglob("*") if path.is_file()
                   and path.name != "catalog.json"] if saves.is_dir() else []
-    total_steps = (len(MOD_FILES) + len(folder_files) + 1 + len(save_files) +
+    total_steps = (len(MOD_FILES) + len(folder_files) + 2 + len(save_files) +
                    int((saves / "catalog.json").is_file()) + len(PACKAGE_FILES))
     completed_steps = 0
 
@@ -277,7 +271,11 @@ def install(source: Path, game: Path, package: Path | None = None,
         _atomic_bytes(destination, data)
         installed_runtime.append(name)
         advance(name)
+    core.save_memory_profile(profile, target / "memory_profile.json")
+    advance("mods/Game Save/memory_profile.json")
     return {"target": target, "compatibility": compatibility,
+            "profile_status": profile["status"],
+            "profile_data_delta": profile["data_delta"],
             "executable_sha256": executable_sha256,
             "executable_size": executable_size,
             "mod_files": updated_mod,

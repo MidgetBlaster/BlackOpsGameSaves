@@ -258,6 +258,8 @@ class Installer(tk.Tk):
 
     def show_complete(self, result: dict):
         self.page = "complete"
+        self.geometry("780x540")
+        self.minsize(720, 520)
         description = ("The mod, game_mod loader, save manager, and map images were installed."
                        if result.get("compatibility") == "unverified" else
                        "Game Save is ready. The mod, game_mod loader, save manager, and map images were installed.")
@@ -267,9 +269,19 @@ class Installer(tk.Tk):
                      anchor="w", pady=(26, 8))
         tk.Label(body, text=f"{result['thumbnails']} map thumbnails installed",
                  bg="#141414", fg="#aaaaaa", font=("Segoe UI", 10)).pack(anchor="w")
+        profile_status = result.get("profile_status", "verified_file")
+        profile_label = {"verified_file": "Memory profile: verified for this executable",
+                         "candidate": "Memory profile: candidate; live check required",
+                         "unavailable": "Memory profile: unavailable for this executable"}[profile_status]
+        tk.Label(body, text=profile_label, bg="#141414",
+                 fg="#d5d5d5" if profile_status == "verified_file" else "#e5b96a",
+                 font=("Segoe UI", 10)).pack(anchor="w", pady=(8, 0))
         if result.get("compatibility") == "unverified":
+            warning = ("A candidate address profile was saved. The manager will verify the running game's checkpoint structures before memory writes."
+                       if profile_status == "candidate" else
+                       "The selected executable did not provide a usable address candidate. Memory saves need a supported build profile.")
             tk.Label(body,
-                     text="This BlackOps.exe has not been tested. Memory saving will start only if the running game passes a read-only layout check after its first checkpoint.",
+                     text=warning,
                      bg="#141414", fg="#e5b96a", font=("Segoe UI", 10),
                      wraplength=690, justify="left").pack(anchor="w", pady=(12, 0))
             details = (f"BlackOps.exe SHA-256: {result['executable_sha256']}\n"

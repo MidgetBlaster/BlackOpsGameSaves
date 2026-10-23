@@ -172,9 +172,14 @@ def test_installer_run_now_after_completion():
             window.show_progress()
             window._report_ui("mods/Game Save/mod.ff", 0.5)
             assert window.progress_value.get() == 50
-            window.finish({"target": manager.parent, "thumbnails": len(MAP_THUMBNAILS)})
+            window.finish({"target": manager.parent, "thumbnails": len(MAP_THUMBNAILS),
+                           "compatibility": "unverified", "profile_status": "candidate",
+                           "executable_sha256": "1" * 64, "executable_size": 8101944})
+            window.update()
             assert window.page == "complete"
             assert window.run_button.cget("text") == "Run Black Ops Game Saves"
+            assert (window.run_button.winfo_rooty() + window.run_button.winfo_height()
+                    <= window.winfo_rooty() + window.winfo_height())
             with (patch.object(installer_frontend.subprocess, "Popen") as launch,
                   patch.object(installer_frontend, "create_desktop_shortcut") as shortcut):
                 window.run_installed()
@@ -259,6 +264,10 @@ def test_unverified_build_installs_with_runtime_gate():
         with patch.object(core, "SUPPORTED_SHA256", "0" * 64):
             result = install(Path(__file__).parent, game)
         assert result["compatibility"] == "unverified"
+        assert result["profile_status"] == "unavailable"
+        saved_profile = json.loads((game / "mods" / "Game Save" /
+                                    "memory_profile.json").read_text(encoding="utf-8"))
+        assert saved_profile["executable_sha256"] == hashlib.sha256(executable.read_bytes()).hexdigest()
         assert (game / "mods" / "Game Save" / "checkpoint_memory.py").is_file()
         assert (game / "bin" / "game_mod.dll").is_file()
 

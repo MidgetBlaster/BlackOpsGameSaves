@@ -74,10 +74,13 @@ The tested game executable has SHA-256
 The manager also accepts a different file when its mapped game code and data
 are identical. For another build, the installer completes and displays the
 `BlackOps.exe` hash and size. At runtime the manager reads the save pointers,
-buffer header, and map identity before permitting memory writes. A compatible
-live layout can be used after the first committed checkpoint. If those
-addresses differ, saving and restore remain disabled until that build is
-profiled. Installer or manager hashes cannot identify a game build.
+buffer header, and map identity before permitting memory writes. Installation
+creates `mods\Game Save\memory_profile.json` for the selected executable. If
+its PE data section moved as a whole, the manager derives candidate addresses
+and verifies them against a live checkpoint before using them. An internal
+layout change cannot be inferred from the hash and still needs a verified
+profile. Saves record their source profile and cannot be restored across
+different address layouts.
 FoV memory writes and the stalled-save-queue repair stay disabled on an
 untested executable because those features use separate addresses.
 Co-op restore still needs a live test with the same host and players. See
@@ -90,7 +93,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.22
+python package_release.py v1.0.23
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,

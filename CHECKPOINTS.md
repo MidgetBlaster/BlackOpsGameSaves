@@ -16,8 +16,13 @@ installer also copies the files for an untested executable and displays its
 SHA-256 and size. The running manager then checks the known save pointers and
 committed checkpoint header without writing memory. It permits memory writes
 only after that live layout is verified. A build with different addresses
-still needs its own profile; the installer cannot derive those addresses from
-the hash of itself or the save manager.
+gets a candidate address profile if its PE data section moved as a whole.
+The installer writes this to `mods/Game Save/memory_profile.json`; a live
+checkpoint must confirm the candidate before it is used. A build whose
+internal data layout changed still needs its own verified profile. The hash
+of the installer or save manager cannot provide those addresses. Checkpoints
+record their source data-section shift and are not restored across different
+address profiles.
 FoV writes and the stalled-save-queue repair stay off on an untested build
 because their addresses are independent of the save buffer layout.
 This is a process-memory tool for the retail game, not a build of the

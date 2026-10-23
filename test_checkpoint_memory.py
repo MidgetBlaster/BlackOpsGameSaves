@@ -49,6 +49,18 @@ def test_executable_compatibility():
                 assert hashlib.sha256(image).hexdigest() in str(error)
             else:
                 raise AssertionError("Changed game code was accepted")
+            shifted = bytearray(original)
+            data_section = table + 2 * 40
+            struct.pack_into("<II", shifted, data_section + 8,
+                             0x3AF36C4, 0x76D000)
+            executable.write_bytes(shifted)
+            profile = c.memory_profile(executable)
+            assert profile["status"] == "candidate"
+            assert profile["data_delta"] == 0x1000
+            assert profile["addresses"]["COMMITTED_PTR"] == c.COMMITTED_PTR + 0x1000
+            c.configure_data_delta(0x1000)
+            assert c.COMMITTED_PTR == profile["addresses"]["COMMITTED_PTR"]
+            c.configure_data_delta(0)
     known = c.GAME / "BlackOps.exe"
     if known.is_file() and hashlib.sha256(known.read_bytes()).hexdigest() == c.SUPPORTED_SHA256:
         assert c.executable_layout_fingerprint(known.read_bytes()) == c.SUPPORTED_LAYOUT_SHA256
@@ -67,7 +79,11 @@ class FakeGame:
             (c.BUFFERS[c.SAVE_B][1], c.BUFFER_SIZES[1]),
             (c.COMMITTED_PTR, 8), (c.COMMITTED_FLAG, 4),
             (c.PAUSED_ADDR, 4), (c.LEVEL_FRAME_ADDR, 4), (c.LEVEL_TIME_ADDR, 4),
-            (c.TIMER_ADDR, 4), (c.ROUND_BYTE_ADDR, 1)]}
+            (c.TIMER_ADDR, 4), (c.ROUND_BYTE_ADDR, 4),
+            (c.SCENE_ADDR, 4), (c.MENU_ADDR, 4), (c.MAGIC_ADDR, 4),
+            (c.ROUND_CHANGE_ADDR, 4), (c.SAVE_QUEUE, 4),
+            (c.SAVE_QUEUE_COUNT, 4), (c.ASYNC_DISK_SAVE, 4),
+            (c.ASYNC_CALLBACK_SAVE, 4)]}
         self.write(c.COMMITTED_PTR, struct.pack('<I', c.SAVE_A))
         self.write(c.WRITE_PTR, struct.pack('<I', c.SAVE_B))
         self.write(c.PAUSED_ADDR, struct.pack('<I', 0))
@@ -110,6 +126,26 @@ game.executable_verified = False
 assert c.SaveQueueUnblocker().observe(game, 0) is False
 game.executable_verified = True
 assert c.probe_live_save_layout(game) is True
+game.write(c.PAUSED_ADDR, struct.pack('<I', 99))
+try:
+    c.probe_live_save_layout(game)
+except RuntimeError as error:
+    assert "round or pause fields" in str(error)
+else:
+    raise AssertionError("An invalid pause field passed the live layout check")
+game.write(c.PAUSED_ADDR, struct.pack('<I', 0))
+try:
+    c.configure_data_delta(0x1000)
+    shifted_game = FakeGame()
+    assert c.probe_live_save_layout(shifted_game) is True
+    c.configure_data_delta(0)
+    shifted_image = bytearray(game.read(c.SAVE_A, c.SAVE_SIZE))
+    struct.pack_into("<I", shifted_image, 0, c.BUFFERS[c.SAVE_A][0] + 0x1000)
+    struct.pack_into("<I", shifted_image, c.MEMFILE_SIZE,
+                     c.BUFFERS[c.SAVE_A][1] + 0x1000)
+    assert c.validate_image(c.SAVE_A + 0x1000, shifted_image, 0x1000)["save_id"] == 1
+finally:
+    c.configure_data_delta(0)
 game.write(c.COMMITTED_PTR, struct.pack('<II', 0, 0))
 assert c.probe_live_save_layout(game) is False
 game.write(c.COMMITTED_PTR, struct.pack('<II', c.SAVE_A, c.SAVE_A))
