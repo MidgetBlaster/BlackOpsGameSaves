@@ -241,20 +241,17 @@ def test_desktop_shortcut_process_stays_hidden():
     assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def test_unsupported_build_stops_before_installing():
+def test_unverified_build_installs_with_runtime_gate():
     with TemporaryDirectory(dir=Path(__file__).parent) as temporary:
         game = Path(temporary) / "Call of Duty Black Ops"
         game.mkdir()
         executable = game / "BlackOps.exe"
         executable.write_bytes(b"different game build")
         with patch.object(core, "SUPPORTED_SHA256", "0" * 64):
-            try:
-                install(game, game)
-            except RuntimeError as error:
-                assert hashlib.sha256(executable.read_bytes()).hexdigest() in str(error)
-            else:
-                raise AssertionError("Installer accepted an unsupported game build")
-        assert not (game / "mods" / "Game Save").exists()
+            result = install(Path(__file__).parent, game)
+        assert result["compatibility"] == "unverified"
+        assert (game / "mods" / "Game Save" / "checkpoint_memory.py").is_file()
+        assert (game / "bin" / "game_mod.dll").is_file()
 
 
 if __name__ == "__main__":
@@ -264,5 +261,5 @@ if __name__ == "__main__":
     test_installer_run_now_after_completion()
     test_wizard_installs_to_selected_game_folder()
     test_desktop_shortcut_process_stays_hidden()
-    test_unsupported_build_stops_before_installing()
+    test_unverified_build_installs_with_runtime_gate()
     print("Game Save installation and reinstallation passed")

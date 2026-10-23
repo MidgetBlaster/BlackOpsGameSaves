@@ -28,7 +28,7 @@ checkpoint even when another row is selected. Automatic saves resume at the chos
 after an in-game Continue. New checkpoints record the map's power-on state
 for restoration during Continue; older checkpoints keep their original script.
 
-The game executable must match the tested Black Ops code and memory layout.
-The installer checks this before copying files and displays the selected
-file's path and SHA-256 if it cannot verify compatibility. Existing
-checkpoints are retained when installing again.
+The installer also copies files for an untested BlackOps.exe and shows that
+game executable's SHA-256 and size. The manager checks the running save layout
+before writing memory. A build with different memory addresses still needs a
+matching profile. Existing checkpoints are retained when installing again.

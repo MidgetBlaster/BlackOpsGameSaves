@@ -106,6 +106,17 @@ class FakeGame:
         yield
 
 game = FakeGame()
+assert c.probe_live_save_layout(game) is True
+game.write(c.COMMITTED_PTR, struct.pack('<II', 0, 0))
+assert c.probe_live_save_layout(game) is False
+game.write(c.COMMITTED_PTR, struct.pack('<II', c.SAVE_A, c.SAVE_A))
+try:
+    c.probe_live_save_layout(game)
+except RuntimeError as error:
+    assert "different save memory layout" in str(error)
+else:
+    raise AssertionError("Invalid save pointers passed the live layout check")
+game.write(c.COMMITTED_PTR, struct.pack('<II', c.SAVE_A, c.SAVE_B))
 assert c.live_round(game) == 4
 game.write(c.ROUND_BYTE_ADDR, b'\x05')
 assert c.live_round(game) == 5

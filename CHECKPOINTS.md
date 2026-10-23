@@ -11,9 +11,13 @@ especially `src/game_sp/g_sp_savegame.h` and `g_sp_savegame.cpp`. It accepts
 the tested `BlackOps.exe` with SHA-256
 `1141278c4599025c85d0e27d1629a5e8ecb0568559c4d9653e693018c3b25f1e`,
 or a file whose mapped game code and data have the same layout and bytes.
-Resource and packaging differences are allowed only when that check matches.
-Other builds remain blocked because the memory addresses are build-specific;
-the installer now displays the selected file path and SHA-256 for diagnosis.
+Resource and packaging differences are allowed when that check matches. The
+installer also copies the files for an untested executable and displays its
+SHA-256 and size. The running manager then checks the known save pointers and
+committed checkpoint header without writing memory. It permits memory writes
+only after that live layout is verified. A build with different addresses
+still needs its own profile; the installer cannot derive those addresses from
+the hash of itself or the save manager.
 This is a process-memory tool for the retail game, not a build of the
 decompiled executable. It never uses `players/save/*.svg`.
 

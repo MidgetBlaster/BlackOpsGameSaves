@@ -1,6 +1,9 @@
 """Check FoV pointer handling without opening or modifying Black Ops."""
 
 import struct
+from unittest.mock import patch
+
+import checkpoint_memory as core
 
 from fov_keeper import (FOV_POINTER, SCALE_POINTER, VALUE_OFFSET,
                         apply_fov, validate_settings)
@@ -28,7 +31,12 @@ class FakeGame:
 
 def test_apply():
     game = FakeGame()
-    assert apply_fov(game, 90, 1.25)
+    game.layout_confirmed = False
+    with patch.object(core, "probe_live_save_layout", side_effect=[False, True]):
+        assert not apply_fov(game, 90, 1.25)
+        assert not game.writes
+        assert apply_fov(game, 90, 1.25)
+    assert game.layout_confirmed
     assert len(game.writes) == 2
     assert apply_fov(game, 90, 1.25)
     assert len(game.writes) == 2

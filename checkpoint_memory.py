@@ -1,7 +1,8 @@
 """Persist BO1 Zombies' committed in-memory save across game launches.
 
 Addresses and layout: MisaDev4/bo1-zombies-decompiled, g_sp_savegame.{h,cpp}.
-Supported executable: the known BlackOps.exe or an identical code/data layout.
+An unrecognized executable may be used only after its live save layout passes
+a read-only check against the known buffer addresses and checkpoint header.
 """
 
 from __future__ import annotations
@@ -146,6 +147,27 @@ def verify_game_executable(executable: Path) -> str:
         "No game memory or files were changed. Share this SHA-256 with the mod maintainer to request support.")
 
 
+def probe_live_save_layout(game) -> bool:
+    """Read-only check for the known save layout in a differently hashed build.
+
+    A fresh process may not have constructed its save buffers yet. In that
+    case, wait for a committed checkpoint before allowing any memory writes.
+    """
+    committed_address, write_address = struct.unpack("<II", game.read(COMMITTED_PTR, 8))
+    if committed_address == write_address == 0:
+        return False
+    if (committed_address, write_address) not in ((SAVE_A, SAVE_B), (SAVE_B, SAVE_A)):
+        raise RuntimeError("This BlackOps.exe uses a different save memory layout. "
+                           "Memory writes are disabled for this build.")
+    image = game.read(committed_address, SAVE_SIZE)
+    if struct.unpack_from("<I", image, STATE_OFFSET)[0] != 3:
+        return False
+    validate_image(committed_address, image)
+    for address, size in zip(BUFFERS[committed_address], BUFFER_SIZES):
+        game.read(address, min(size, 16))
+    return True
+
+
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
                 ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
@@ -206,9 +228,20 @@ class GameProcess:
             executable = Path(path.value)
             if executable.name.lower() != "blackops.exe":
                 raise RuntimeError(f"Unsupported process: {executable.name}")
-            verify_game_executable(executable)
+            self.layout_confirmed = True
+            self.compatibility_error = None
+            try:
+                verify_game_executable(executable)
+            except RuntimeError as error:
+                self.layout_confirmed = False
+                self.compatibility_error = str(error)
             if self.read(BASE, 2) != b"MZ":
                 raise RuntimeError("The game image is not at the expected base address")
+            if not self.layout_confirmed:
+                try:
+                    self.layout_confirmed = probe_live_save_layout(self)
+                except (OSError, RuntimeError) as error:
+                    raise RuntimeError(f"{self.compatibility_error}\nLive layout check: {error}") from error
         except BaseException:
             self.close()
             raise
@@ -230,6 +263,14 @@ class GameProcess:
         return bytes(data)
 
     def write(self, address: int, data: bytes):
+        if not self.layout_confirmed:
+            try:
+                self.layout_confirmed = probe_live_save_layout(self)
+            except (OSError, RuntimeError) as error:
+                raise RuntimeError(f"{self.compatibility_error}\nLive layout check: {error}") from error
+            if not self.layout_confirmed:
+                raise RuntimeError("This BlackOps.exe has not produced a compatible checkpoint yet. "
+                                   "Memory writes are disabled until the live save layout can be verified.")
         source = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
         count = ctypes.c_size_t()
         if not self.kernel.WriteProcessMemory(self.handle, ctypes.c_void_p(address), source,

@@ -1,4 +1,14 @@
-# Black Ops Game Saves v1.0.19
+# Black Ops Game Saves v1.0.20
+
+- The installer now installs the complete mod and app for an untested
+  BlackOps.exe instead of stopping before copying files. It shows the game
+  executable's hash and size, with a button to copy those details.
+- The manager checks an untested running game's save pointers and committed
+  checkpoint header before any memory write. Builds with the known live layout
+  can save after their first checkpoint. A different memory layout remains
+  blocked until it has a verified address profile.
+
+## v1.0.19
 
 - Overwrite Game Saves now keeps the launched checkpoint as the target for
   every automatic and manual checkpoint, even after browsing another save.

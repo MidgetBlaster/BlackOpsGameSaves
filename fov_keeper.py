@@ -1,8 +1,8 @@
 """Keep Black Ops singleplayer/Zombies FoV values set across map resets.
 
 Pointer locations for BlackOps.exe are adapted from Marvin Lehmann's
-MIT-licensed CoD SCZ FoV Changer (FrmSelection.cs). This companion supports
-only the one verified BlackOps.exe SHA-256 in checkpoint_memory.py.
+MIT-licensed CoD SCZ FoV Changer (FrmSelection.cs). An unrecognized executable
+must pass the live save-layout check before any FoV memory write.
 """
 
 from __future__ import annotations
@@ -37,6 +37,13 @@ def _value_address(game: core.GameProcess, pointer_location: int) -> int | None:
 def apply_fov(game: core.GameProcess, fov: float, scale: float) -> bool:
     """Write only plausible, live FoV dvars in the verified SP process."""
     fov, scale = validate_settings(fov, scale)
+    if not getattr(game, "layout_confirmed", True):
+        try:
+            game.layout_confirmed = core.probe_live_save_layout(game)
+        except (OSError, RuntimeError):
+            return False
+        if not game.layout_confirmed:
+            return False
     addresses = (_value_address(game, FOV_POINTER),
                  _value_address(game, SCALE_POINTER))
     if None in addresses:

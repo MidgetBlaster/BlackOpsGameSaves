@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -173,7 +174,15 @@ def install(source: Path, game: Path, package: Path | None = None,
     executable = game / "BlackOps.exe"
     if not executable.is_file():
         raise FileNotFoundError(f"BlackOps.exe was not found in {game}")
-    core.verify_game_executable(executable)
+    executable_size = executable.stat().st_size
+    executable_sha256 = hashlib.sha256(executable.read_bytes()).hexdigest()
+    # Installing files is safe even when this BlackOps.exe has not yet been
+    # profiled. Memory access is checked separately when the game is running.
+    try:
+        core.verify_game_executable(executable)
+        compatibility = "tested"
+    except RuntimeError:
+        compatibility = "unverified"
     package = package or source / "installer" / "game_mod.zip"
     if not package.is_file():
         raise FileNotFoundError(f"The bundled game_mod.zip is missing: {package}")
@@ -268,7 +277,10 @@ def install(source: Path, game: Path, package: Path | None = None,
         _atomic_bytes(destination, data)
         installed_runtime.append(name)
         advance(name)
-    return {"target": target, "mod_files": updated_mod,
+    return {"target": target, "compatibility": compatibility,
+            "executable_sha256": executable_sha256,
+            "executable_size": executable_size,
+            "mod_files": updated_mod,
             "saves": copied_saves, "runtime_files": installed_runtime,
             "backups": backed_up, "thumbnails": len(MAP_THUMBNAILS)}
 

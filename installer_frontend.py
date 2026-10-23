@@ -249,13 +249,30 @@ class Installer(tk.Tk):
 
     def show_complete(self, result: dict):
         self.page = "complete"
-        body, footer = self._page("Installation complete",
-                                  "Game Save is ready. The mod, game_mod loader, save manager, and map images were installed.")
+        description = ("The mod, game_mod loader, save manager, and map images were installed."
+                       if result.get("compatibility") == "unverified" else
+                       "Game Save is ready. The mod, game_mod loader, save manager, and map images were installed.")
+        body, footer = self._page("Installation complete", description)
         tk.Label(body, text=str(result["target"]), bg="#141414", fg="#dddddd",
                  font=("Segoe UI", 10), wraplength=690, justify="left").pack(
                      anchor="w", pady=(26, 8))
         tk.Label(body, text=f"{result['thumbnails']} map thumbnails installed",
                  bg="#141414", fg="#aaaaaa", font=("Segoe UI", 10)).pack(anchor="w")
+        if result.get("compatibility") == "unverified":
+            tk.Label(body,
+                     text="This BlackOps.exe has not been tested. Memory saving will start only if the running game passes a read-only layout check after its first checkpoint.",
+                     bg="#141414", fg="#e5b96a", font=("Segoe UI", 10),
+                     wraplength=690, justify="left").pack(anchor="w", pady=(12, 0))
+            details = (f"BlackOps.exe SHA-256: {result['executable_sha256']}\n"
+                       f"Size: {result['executable_size']:,} bytes")
+            tk.Label(body, text=details, bg="#141414", fg="#cccccc",
+                     font=("Consolas", 9), wraplength=690,
+                     justify="left").pack(anchor="w", pady=(8, 0))
+            def copy_build_details():
+                self.clipboard_clear()
+                self.clipboard_append(details)
+            self._button(body, "Copy game build details", copy_build_details).pack(
+                anchor="w", pady=(8, 0))
         tk.Checkbutton(body, text="Create a Desktop icon", variable=self.shortcut,
                        bg="#141414", fg="#eeeeee", selectcolor="#242424",
                        activebackground="#141414", activeforeground="#eeeeee",

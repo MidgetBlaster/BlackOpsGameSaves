@@ -18,8 +18,8 @@ Download the Windows package from Releases, then:
    **Run Black Ops Game Saves** or **Finish**. You can also open
    `mods\Game Save\BlackOpsGameSaves.exe` later.
 
-The installer suggests the detected Black Ops folder and checks the game's
-executable before copying anything. It installs the Game Save mod, map
+The installer suggests the detected Black Ops folder and installs even when
+the game's executable has not been tested. It installs the Game Save mod, map
 thumbnails, `game_mod` loader, manager, and icon together. Only the installer
 EXE is needed on another machine; all required files are embedded. Personal checkpoints
 are never included in the installer, and existing checkpoints are retained.
@@ -70,9 +70,13 @@ the selected map in the current view. Then choose **Export selected** or
 
 The tested game executable has SHA-256
 `1141278c4599025c85d0e27d1629a5e8ecb0568559c4d9653e693018c3b25f1e`.
-The installer also accepts a different file when its mapped game code and data
-are identical. Other builds show their path and SHA-256 so compatibility can be
-investigated without risking a memory save on unknown addresses.
+The manager also accepts a different file when its mapped game code and data
+are identical. For another build, the installer completes and displays the
+`BlackOps.exe` hash and size. At runtime the manager reads the save pointers,
+buffer header, and map identity before permitting memory writes. A compatible
+live layout can be used after the first committed checkpoint. If those
+addresses differ, saving and restore remain disabled until that build is
+profiled. Installer or manager hashes cannot identify a game build.
 Co-op restore still needs a live test with the same host and players. See
 [CHECKPOINTS.md](CHECKPOINTS.md) for usage details and current limits.
 
@@ -83,7 +87,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.19
+python package_release.py v1.0.20
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,
@@ -104,7 +108,7 @@ python test_fov_keeper.py
 
 ## Publishing
 
-This checkout is prepared for `https://github.com/MidgetBlast/BlackOpsGameSaves`.
+This checkout is prepared for `https://github.com/MidgetBlaster/BlackOpsGameSaves`.
 Push the prepared branch and release tag with:
 
 ```powershell
