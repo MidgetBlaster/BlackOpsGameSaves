@@ -85,7 +85,7 @@ class Installer(tk.Tk):
         self.installed_app: Path | None = None
         self.shortcut_done = False
         found = game_save_installer.find_game()
-        self.folder = tk.StringVar(value=str(found) if found else "")
+        self.executable_path = tk.StringVar(value=str(found / "BlackOps.exe") if found else "")
         self.shortcut = tk.BooleanVar(value=True)
         self.current_item = tk.StringVar(value="Preparing installation…")
         self.progress_value = tk.DoubleVar(value=0)
@@ -122,7 +122,7 @@ class Installer(tk.Tk):
         self.page = "welcome"
         body, footer = self._page("BLACK OPS GAME SAVES",
                                   "Install the Game Save mod, game_mod loader, save manager, and Zombies map images from this one installer.")
-        tk.Label(body, text="The next page lets you choose your Black Ops folder.",
+        tk.Label(body, text="The next page lets you choose your BlackOps.exe file.",
                  bg="#141414", fg="#aaaaaa", font=("Segoe UI", 10)).pack(
                      anchor="w", pady=(32, 0))
         self.start_button = self._button(footer, "Install Game Save", self.show_location,
@@ -133,19 +133,23 @@ class Installer(tk.Tk):
 
     def show_location(self):
         self.page = "location"
-        body, footer = self._page("Choose Black Ops folder",
-                                  "Use the folder containing BlackOps.exe. The installer will place files in the correct mod and game folders inside it.")
-        tk.Label(body, text="Game installation", bg="#141414", fg="#eeeeee",
+        body, footer = self._page("Choose BlackOps.exe",
+                                  "Select the executable for the Black Ops installation you want to use. The installer puts the mod beside that game.")
+        tk.Label(body, text="BlackOps.exe", bg="#141414", fg="#eeeeee",
                  font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(32, 8))
         row = tk.Frame(body, bg="#141414")
         row.pack(fill="x")
-        tk.Entry(row, textvariable=self.folder, bg="#242424", fg="#eeeeee",
+        tk.Entry(row, textvariable=self.executable_path, bg="#242424", fg="#eeeeee",
                  insertbackground="#eeeeee", relief="flat", font=("Segoe UI", 10)).pack(
                      side="left", fill="x", expand=True, ipady=9)
-        self._button(row, "Browse…", self.browse).pack(side="right", padx=(10, 0))
-        tk.Label(body, text="Example: D:\\Program Files (x86)\\Steam\\steamapps\\common\\Call of Duty Black Ops",
+        self.browse_button = self._button(row, "Browse for BlackOps.exe…", self.browse)
+        self.browse_button.pack(side="right", padx=(10, 0))
+        tk.Label(body, text="Example: D:\\Program Files (x86)\\Steam\\steamapps\\common\\Call of Duty Black Ops\\BlackOps.exe",
                  bg="#141414", fg="#999999", font=("Segoe UI", 9),
                  wraplength=690, justify="left").pack(anchor="w", pady=(14, 0))
+        tk.Label(body, text="Selecting the file identifies the game build. Untested memory layouts are checked when the game runs; selection alone cannot determine new addresses.",
+                 bg="#141414", fg="#aaaaaa", font=("Segoe UI", 9),
+                 wraplength=690, justify="left").pack(anchor="w", pady=(8, 0))
         tk.Label(body, text="Installs to mods\\Game Save, bin, main, and zone\\Common. Existing saves are kept.",
                  bg="#141414", fg="#999999", font=("Segoe UI", 9)).pack(
                      anchor="w", pady=(8, 0))
@@ -204,16 +208,21 @@ class Installer(tk.Tk):
         self.destroy()
 
     def browse(self):
-        chosen = filedialog.askdirectory(parent=self, title="Choose Black Ops game folder",
-                                          initialdir=self.folder.get() or None)
+        current = Path(self.executable_path.get().strip().strip('"')).expanduser()
+        chosen = filedialog.askopenfilename(
+            parent=self, title="Choose BlackOps.exe",
+            initialdir=str(current.parent) if current.is_file() else None,
+            initialfile="BlackOps.exe",
+            filetypes=[("Black Ops executable", "BlackOps.exe"), ("Executable files", "*.exe")])
         if chosen:
-            self.folder.set(chosen)
+            self.executable_path.set(chosen)
 
     def begin(self):
-        game = Path(self.folder.get().strip()).expanduser()
-        if not (game / "BlackOps.exe").is_file():
-            messagebox.showerror("Choose Black Ops", "Select the folder containing BlackOps.exe.", parent=self)
+        executable = Path(self.executable_path.get().strip().strip('"')).expanduser()
+        if executable.name.casefold() != "blackops.exe" or not executable.is_file():
+            messagebox.showerror("Choose Black Ops", "Select the BlackOps.exe file for your game.", parent=self)
             return
+        game = executable.parent
         self.installing = True
         self.installed_app = None
         self.progress_value.set(0)

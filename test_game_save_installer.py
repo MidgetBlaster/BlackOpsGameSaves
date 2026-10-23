@@ -165,6 +165,7 @@ def test_installer_run_now_after_completion():
             window.update()
             assert window.page == "location"
             assert window.install_button.cget("text") == "Install"
+            assert "BlackOps.exe" in window.browse_button.cget("text")
             assert window.shortcut.get() is True
             assert (window.install_button.winfo_rooty() + window.install_button.winfo_height()
                     <= window.winfo_rooty() + window.winfo_height())
@@ -208,7 +209,15 @@ def test_wizard_installs_to_selected_game_folder():
             window = installer_frontend.Installer()
             try:
                 window.show_location()
-                window.folder.set(str(game))
+                window.executable_path.set(str(game))
+                window.begin()
+                assert window.page == "location"
+                errors.assert_called_once()
+                with patch.object(installer_frontend.filedialog, "askopenfilename",
+                                  return_value=str(executable)) as choose_file:
+                    window.browse()
+                assert choose_file.called
+                assert window.executable_path.get() == str(executable)
                 window.begin()
                 deadline = time.monotonic() + 20
                 while window.page == "progress" and time.monotonic() < deadline:

@@ -1,4 +1,12 @@
-# Black Ops Game Saves v1.0.21
+# Black Ops Game Saves v1.0.22
+
+- The installer now lets users browse directly to their own BlackOps.exe.
+  It installs beside that selected executable and reports its build hash when
+  the build is untested.
+  Selecting an executable does not discover unknown memory addresses; the
+  running manager still validates the live save layout before writing.
+
+## v1.0.21
 
 - Keeps FoV writes and the stalled-save-queue repair disabled on an untested
   executable. These features use addresses separate from the checkpoint

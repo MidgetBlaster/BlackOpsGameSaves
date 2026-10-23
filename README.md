@@ -12,13 +12,14 @@ stats, favorites, save export/import, FoV and movement controls, and a co-op pau
 Download the Windows package from Releases, then:
 
 1. Run `InstallBlackOpsGameSaves.exe` and click **Install Game Save**.
-2. Keep the detected game folder, or Browse to the folder containing
-   `BlackOps.exe`, then click **Install**. The progress page lists the files.
+2. Keep the detected `BlackOps.exe`, or click **Browse for BlackOps.exe** and
+   select your game's executable, then click **Install**. The progress page
+   lists the files.
 3. On the completion page, choose whether to create a Desktop icon, then click
    **Run Black Ops Game Saves** or **Finish**. You can also open
    `mods\Game Save\BlackOpsGameSaves.exe` later.
 
-The installer suggests the detected Black Ops folder and installs even when
+The installer suggests the detected Black Ops executable and installs even when
 the game's executable has not been tested. It installs the Game Save mod, map
 thumbnails, `game_mod` loader, manager, and icon together. Only the installer
 EXE is needed on another machine; all required files are embedded. Personal checkpoints
@@ -89,7 +90,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.21
+python package_release.py v1.0.22
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,

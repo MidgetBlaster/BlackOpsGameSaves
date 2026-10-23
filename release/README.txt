@@ -1,7 +1,7 @@
 Black Ops Game Saves — Windows installer
 
 1. Run InstallBlackOpsGameSaves.exe and click Install Game Save.
-2. Keep the detected game folder or Browse to the folder containing BlackOps.exe,
+2. Keep the detected BlackOps.exe path or Browse to the game's executable,
    then click Install. Watch the file list and progress bar.
 3. When installation finishes, choose whether to create a Desktop icon. Click
    Run Black Ops Game Saves or Finish. You can also open

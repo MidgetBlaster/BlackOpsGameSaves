@@ -38,8 +38,8 @@ The `release` package has one installer and one standalone manager:
   `mods/Game Save` alongside the installed mod files.
 
 The first installer page has **Install Game Save** and **Cancel**. On the next
-page, keep the detected Black Ops directory or Browse to the folder containing
-`BlackOps.exe`, then click **Install**. A progress page lists each installed
+page, keep the detected `BlackOps.exe` path or Browse to the executable in
+your own game folder, then click **Install**. A progress page lists each installed
 item. On the completion page, select **Create a Desktop icon** if wanted, then
 click **Run Black Ops Game Saves** or **Finish**. The installer EXE includes the mod,
 loader, map PNGs, manager, and icon; no other download is required. The window and
