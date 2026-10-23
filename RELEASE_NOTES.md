@@ -1,4 +1,13 @@
-# Black Ops Game Saves v1.0.23
+# Black Ops Game Saves v1.0.24
+
+- New installations start with Overwrite Game Saves enabled. A New Game makes
+  its first checkpoint as a new save and overwrites that save afterward.
+- Saved game rows and details show the next round after the stored checkpoint
+  round. The checkpoint data and in-game round tracking are unchanged.
+- Starting BlackOps.exe waits until the process appears or the user cancels,
+  without a 90-second timeout popup.
+
+## v1.0.23
 
 - Installation creates `memory_profile.json` for the selected BlackOps.exe,
   recording its hash and the addresses derived from its PE data section.

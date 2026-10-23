@@ -2,9 +2,23 @@ from unittest.mock import patch
 import ctypes
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import threading
 
 import checkpoint_memory as core
 import game_launcher
+
+
+for waiting in (lambda cancel: game_launcher.wait_for_game(cancel),
+                lambda cancel: game_launcher.wait_for_replacement_game(4420, cancel)):
+    cancel = threading.Event()
+    with (patch.object(core, "game_pid", return_value=None),
+          patch.object(game_launcher.time, "sleep", side_effect=lambda _: cancel.set())):
+        try:
+            waiting(cancel)
+        except RuntimeError as error:
+            assert "canceled" in str(error)
+        else:
+            raise AssertionError("Game startup wait ignored Cancel")
 
 
 command, directory = game_launcher.launch_command("zombie_cod5_factory")

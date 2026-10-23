@@ -94,10 +94,10 @@ def _check_cancel(cancel: threading.Event | None):
         raise RuntimeError("Starting the saved game was canceled")
 
 
-def wait_for_game(cancel: threading.Event | None = None, timeout: float = 90,
+def wait_for_game(cancel: threading.Event | None = None, timeout: float | None = None,
                   *, write: bool = False, suspend: bool = False) -> core.GameProcess:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while deadline is None or time.monotonic() < deadline:
         _check_cancel(cancel)
         pid = core.game_pid()
         if pid:
@@ -110,13 +110,13 @@ def wait_for_game(cancel: threading.Event | None = None, timeout: float = 90,
                 # fully mapped. Reattach after process initialization.
                 pass
         time.sleep(0.5)
-    raise RuntimeError("Black Ops did not start within 90 seconds")
+    raise RuntimeError(f"Black Ops did not start within {timeout:g} seconds")
 
 
 def wait_for_replacement_game(previous_pid: int, cancel: threading.Event | None = None,
-                              timeout: float = 90) -> core.GameProcess:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+                              timeout: float | None = None) -> core.GameProcess:
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while deadline is None or time.monotonic() < deadline:
         _check_cancel(cancel)
         pid = core.game_pid()
         if pid and pid != previous_pid:
@@ -476,8 +476,8 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
     if report:
         report(f"Starting {metadata['map']} with game_mod.dll and the Game Save mod...")
     subprocess.Popen(command, cwd=folder)
-    deadline = time.monotonic() + 180
     game = wait_for_game(cancel, write=True, suspend=True)
+    deadline = time.monotonic() + 180
     while True:
         try:
             if report:
@@ -490,8 +490,8 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
             game.close()
             if report:
                 report("Black Ops switched processes during startup. Reconnecting to the game...")
-            game = wait_for_game(cancel, timeout=max(0, deadline - time.monotonic()),
-                                 write=True, suspend=True)
+            game = wait_for_game(cancel, write=True, suspend=True)
+            deadline = time.monotonic() + 180
         except BaseException:
             game.close()
             raise
@@ -530,8 +530,8 @@ def start_new_game(map_name: str, cancel: threading.Event | None = None,
     if report:
         report(f"Starting a new {map_name} game with the Game Save mod...")
     subprocess.Popen(command, cwd=folder)
-    deadline = time.monotonic() + 180
     game = wait_for_game(cancel, write=True, suspend=True)
+    deadline = time.monotonic() + 180
     while True:
         try:
             wait_for_map_ready(game, map_name, cancel,
@@ -539,8 +539,8 @@ def start_new_game(map_name: str, cancel: threading.Event | None = None,
             return game
         except GameProcessReplaced:
             game.close()
-            game = wait_for_game(cancel, timeout=max(0, deadline - time.monotonic()),
-                                 write=True, suspend=True)
+            game = wait_for_game(cancel, write=True, suspend=True)
+            deadline = time.monotonic() + 180
         except BaseException:
             game.close()
             raise

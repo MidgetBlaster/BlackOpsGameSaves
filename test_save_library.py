@@ -19,6 +19,7 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directo
             file.writestr("save.bin", b"checkpoint data")
         original = save.read_bytes()
         catalog = lib.SaveLibrary(archive / "catalog.json")
+        assert catalog.data["save_policy"] == "Replace started save"
         assert len(catalog.data["saves"]) == 1
         assert catalog.data["saves"][save.name]["title"] == "Save Game 1"
         second = archive / "sample-round-005.bo1checkpoint"
@@ -53,6 +54,7 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directo
                                              "weapons": "M1911, MP40", "revives": 0,
                                              "downs": 1, "kills": 22}])
         reopened = lib.SaveLibrary(archive / "catalog.json")
+        assert reopened.data["save_policy"] == "Replace started save"
         entry = reopened.data["saves"][save.name]
         assert (entry["title"], entry["kind"], entry["favorite"], entry["profile_id"]) == (
             "High round attempt", "auto", True, profile)

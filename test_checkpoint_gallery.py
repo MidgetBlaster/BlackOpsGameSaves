@@ -31,6 +31,8 @@ def test_recent_saves():
     entries["kino-4"]["players"] = [{"name": "Test Player", "points": 1200,
                                       "kills": 9, "downs": 0, "revives": 1,
                                       "weapons": "M1911"}]
+    assert gui.shown_round(entries["kino-4"]) == 5
+    assert entries["kino-4"]["round"] == 4
     assert [name for name, _ in gui.recent_map_saves(entries, "zombie_theater", "All saves")] == [
         "kino-4", "kino-3", "kino-2"]
     imported = dict(entries)
@@ -114,6 +116,7 @@ def test_recent_saves():
             assert canvas.itemcget(title, "fill") == "#0d0d0d"
             assert gui.FONT_FAMILY in canvas.itemcget(title, "font")
             save_rectangle = app.gallery_save_rows["kino-4"][0]
+            assert canvas.itemcget(app.gallery_save_rows["kino-4"][2], "text").startswith("Round 5")
             save_width = canvas.coords(save_rectangle)[2] - canvas.coords(save_rectangle)[0]
             assert save_width <= 340
             for row in app.gallery_save_rows.values():
@@ -177,6 +180,16 @@ def test_recent_saves():
                 ]
                 register.assert_not_called()
                 assert app.started_save_name == "kino-3"
+            app.started_save_name = None
+            app._select_gallery_save("kino-4")
+            with patch.object(app.library, "replace_save", create=True) as replace, \
+                 patch.object(app.library, "register", create=True,
+                              return_value=entries["kino-4"]) as register:
+                app.events.put(("saved", Path("fresh-game.bo1checkpoint"), "auto", "imported", None))
+                app._poll_events()
+                replace.assert_not_called()
+                register.assert_called_once()
+                assert app.started_save_name == "fresh-game.bo1checkpoint"
             for number in range(5, 9):
                 entries[f"kino-{number}"] = {
                     "map": "zombie_theater", "round": number,

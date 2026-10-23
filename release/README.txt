@@ -24,7 +24,11 @@ checkpoint reader. Older checkpoints retain their matching scripts.
 Hold Shift and click to select a range across save pages, Ctrl-click to
 select individual saves, or press Shift+A to select every save on the selected
 map in the current view before using Export Save or Delete. Overwrite Game Saves updates the launched
-checkpoint even when another row is selected. Automatic saves resume at the chosen round boundary
+checkpoint even when another row is selected, and starts on for a new install.
+A New Game creates its first save before overwriting it on later rounds. The
+save list shows the next round after each checkpoint without changing the
+checkpoint's stored round. Starting Black Ops waits until it opens or Cancel
+is pressed, without a 90-second popup. Automatic saves resume at the chosen round boundary
 after an in-game Continue. New checkpoints record the map's power-on state
 for restoration during Continue; older checkpoints keep their original script.
 

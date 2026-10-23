@@ -67,6 +67,7 @@ class SaveLibrary:
                 raise ValueError("Unsupported save catalog")
         else:
             self.data = {"format": 1, "active_profile": "imported",
+                         "save_policy": "Replace started save",
                          "profiles": [{"id": "imported", "title": "Imported saves", "mode": "Unknown"}],
                          "saves": {}}
         self.data.setdefault("next_save_number_by_map", {})

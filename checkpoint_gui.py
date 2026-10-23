@@ -96,6 +96,12 @@ def save_date(value: str, *, long: bool = False) -> str:
         return value or "Unknown date"
 
 
+def shown_round(entry: dict) -> int | str:
+    """Show the round reached after the saved end-of-round checkpoint."""
+    value = entry.get("round")
+    return value + 1 if isinstance(value, int) and not isinstance(value, bool) else "?"
+
+
 def launch_as_administrator() -> bool:
     if sys.platform != "win32" or ctypes.windll.shell32.IsUserAnAdmin():
         return False
@@ -705,7 +711,8 @@ class CheckpointApp(tk.Tk):
             if category == "Imported saves" and not entry.get("imported"):
                 continue
             profile = profiles.get(entry["profile_id"], profiles["imported"])
-            haystack = f"{entry['title']} {entry['map']} {profile['title']} {entry.get('round', '')}".casefold()
+            haystack = (f"{entry['title']} {entry['map']} {profile['title']} "
+                        f"{entry.get('round', '')} {shown_round(entry)}").casefold()
             if search and search not in haystack:
                 continue
             count = entry.get("player_count") or len(entry.get("players", []))
@@ -715,7 +722,7 @@ class CheckpointApp(tk.Tk):
             people = "Solo" if mode == "Solo" else (f"{count} players" if count else
                      ("Co-op" if mode == "Co-op" else "Players unknown"))
             title = (f"{'★  ' if entry['favorite'] else ''}{entry.get('title', 'Save Game')}"
-                     f"    •    Round {entry['round']}    •    {people}"
+                     f"    •    Round {shown_round(entry)}    •    {people}"
                      f"    •    {save_date(entry.get('saved_at', ''))}")
             self.tree.insert("", "end", iid=name, text=title)
         remaining = [name for name in selected if self.tree.exists(name)]
@@ -924,7 +931,7 @@ class CheckpointApp(tk.Tk):
                     font=(BODY_FONT, 9, "bold"), tags=(tag,))
                 subtitle = canvas.create_text(
                     save_x + 13, y + (23 if compact else 26),
-                    text=f"Round {entry.get('round', '?')}  ·  {save_date(entry.get('saved_at', ''))}",
+                    text=f"Round {shown_round(entry)}  ·  {save_date(entry.get('saved_at', ''))}",
                     anchor="w", fill="#252525" if active else MUTED,
                     font=(BODY_FONT, 8), tags=(tag,))
                 self.gallery_save_rows[name] = (rectangle, title, subtitle)
@@ -1131,7 +1138,7 @@ class CheckpointApp(tk.Tk):
         count = entry.get("player_count") or len(entry.get("players", []))
         mode = entry.get("saved_mode") or profile["mode"]
         description = "Solo · 1 player" if mode == "Solo" else (f"{count} players" if count else mode)
-        for line in (f"Round {entry.get('round', '?')}", description, profile["title"]):
+        for line in (f"Round {shown_round(entry)}", description, profile["title"]):
             tk.Label(self.details, text=line, bg=SURFACE, fg=MUTED, font=(BODY_FONT, 10),
                      wraplength=245, justify="left").pack(anchor="w", pady=(0, 4))
         tk.Frame(self.details, bg=BORDER, height=1).pack(fill="x", pady=(11, 12))
@@ -1549,8 +1556,7 @@ class CheckpointApp(tk.Tk):
                     _, path, save_kind, profile_id, title = event
                     try:
                         overwrite_enabled = self.save_policy.get() == "Replace started save"
-                        overwrite_target = (self.started_save_name or self.selected_name()
-                                            if overwrite_enabled else None)
+                        overwrite_target = self.started_save_name if overwrite_enabled else None
                         overwrite_error = None
                         if overwrite_target:
                             try:
