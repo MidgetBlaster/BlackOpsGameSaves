@@ -350,6 +350,7 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
     # console and bound keys, preventing the final continue command.
     core.restore(game, save_path, coop=True)
     wait_for_focus(game, cancel)
+    before_continue = (game.u32(core.LEVEL_FRAME_ADDR), game.u32(core.LEVEL_TIME_ADDR))
     if power_config:
         game.press_game_key(0x71, "F2 restore power state before Continue")
     # Start Game restores under a brief process suspension, so the pause menu
@@ -360,7 +361,36 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
         # restored script VM resumes so power is applied before play begins.
         time.sleep(0.2)
         game.press_game_key(0x71, "F2 restore power state during Continue")
-    wait_for_loaded_round(game, metadata.get("round"), cancel)
+    resumed = wait_for_loaded_round(game, metadata.get("round"), cancel,
+                                    timeout=8, before_clock=before_continue)
+    if not resumed:
+        try:
+            saved_round = metadata.get("round")
+            current_round = core.live_round(game)
+            still_at_first_round = (isinstance(saved_round, int) and saved_round > 1 and
+                                    current_round in (None, 1))
+        except OSError:
+            still_at_first_round = False
+        if still_at_first_round:
+            # Ascension and other maps can accept the fresh F11 checkpoint
+            # before the script VM is ready to process the first F12.
+            wait_for_map_ready(game, metadata["map"], cancel,
+                               during_opening=False, allow_stale_checkpoint=True)
+            wait_for_focus(game, cancel)
+            before_continue = (game.u32(core.LEVEL_FRAME_ADDR),
+                               game.u32(core.LEVEL_TIME_ADDR))
+            game.press_load()
+            resumed = wait_for_loaded_round(game, metadata.get("round"), cancel,
+                                            timeout=20, before_clock=before_continue)
+            if not resumed and core.live_round(game) == 1:
+                raise RuntimeError(
+                    f"{metadata['map']} stayed at round 1 after two Continue attempts. "
+                    "The checkpoint is still available; check the Black Ops console "
+                    "for a load error before trying again.")
+    if not resumed:
+        metadata["resume_warning"] = (
+            "The Continue command was sent, but the game did not confirm the resumed "
+            "checkpoint. Check its round before playing on.")
     if weapon_config:
         wait_for_focus(game, cancel)
         game.press_game_key(0x73, "F4 equipped weapon restore")
@@ -408,21 +438,41 @@ def weapon_restore_config(save_path: Path) -> bool:
 
 def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
                           cancel: threading.Event | None = None,
-                          timeout: float = 20) -> bool:
-    """Observe the resumed round before resuming the watcher."""
-    if not saved_round:
+                          timeout: float = 20,
+                          *, before_clock: tuple[int, int] | None = None) -> bool:
+    """Confirm Continue by save-reader state, clock change, or restored round."""
+    if not saved_round and before_clock is None:
         return False
     started = time.monotonic()
     last_frame = None
     stable = 0
+    load_started = False
     while time.monotonic() - started < timeout:
         _check_cancel(cancel)
         try:
             frame = game.u32(core.LEVEL_FRAME_ADDR)
+            level_time = game.u32(core.LEVEL_TIME_ADDR)
             menu = game.u32(core.MENU_ADDR)
             observed = core.live_round(game)
-            if (menu == 0 and observed == saved_round and last_frame is not None
-                    and frame > last_frame and time.monotonic() - started >= 1.5):
+            elapsed = time.monotonic() - started
+            if before_clock is not None:
+                prior_frame, prior_time = before_clock
+                if (frame + 20 < prior_frame or level_time + 1000 < prior_time or
+                        level_time > prior_time + elapsed * 1000 + 5000):
+                    load_started = True
+            try:
+                committed_address = game.u32(core.COMMITTED_PTR)
+                if committed_address in core.BUFFERS and \
+                        game.u32(committed_address + core.STATE_OFFSET) == 4:
+                    load_started = True
+            except OSError as error:
+                if isinstance(error, PermissionError) or error.errno not in (299, 487, 998):
+                    raise
+            round_matches = (isinstance(saved_round, int) and saved_round > 0 and
+                             observed in (saved_round, saved_round + 1))
+            if (menu == 0 and (load_started or
+                    (isinstance(saved_round, int) and saved_round > 1 and round_matches)) and
+                    last_frame is not None and frame > last_frame and elapsed >= 1.5):
                 stable += 1
                 if stable >= 3:
                     return True

@@ -1445,7 +1445,8 @@ class CheckpointApp(tk.Tk):
                 self.events.put(("start_loaded", name, entry["title"], metadata["round"],
                                  entry["profile_id"], game_launcher.legacy_scripts(metadata),
                                  game_launcher.enhanced_scripts(metadata),
-                                 loaded.get("weapon_restore_warning", "")))
+                                 loaded.get("weapon_restore_warning", ""),
+                                 loaded.get("resume_warning", "")))
             finally:
                 game.close()
         self._start_worker(work)
@@ -1485,7 +1486,8 @@ class CheckpointApp(tk.Tk):
                 self.events.put(("start_loaded", name, title, round_number, profile_id,
                                  game_launcher.legacy_scripts(metadata),
                                  game_launcher.enhanced_scripts(metadata),
-                                 loaded.get("weapon_restore_warning", "")))
+                                 loaded.get("weapon_restore_warning", ""),
+                                 loaded.get("resume_warning", "")))
             finally:
                 game.close()
         self._start_worker(work)
@@ -1652,7 +1654,7 @@ class CheckpointApp(tk.Tk):
                     self.status.set(f"{title} is on the matching map. Waiting for all co-op players to rejoin.")
                     self.after(100, self._ask_coop_ready)
                 elif kind == "start_loaded":
-                    _, name, title, round_number, profile_id, legacy, options, weapon_warning = event
+                    _, name, title, round_number, profile_id, legacy, options, weapon_warning, resume_warning = event
                     self.current_session_legacy = legacy
                     self.current_session_options = options
                     self.pending_coop = None
@@ -1663,8 +1665,12 @@ class CheckpointApp(tk.Tk):
                     self._set_busy(False)
                     self.library.set_active_profile(profile_id)
                     self.refresh()
-                    self.status.set(f"Loaded {title}. Auto save: {self.save_timing.get().lower()}; F11 saves manually."
-                                    + (f" {weapon_warning}" if weapon_warning else ""))
+                    if resume_warning:
+                        self.status.set(f"Continue sent for {title}. {resume_warning}"
+                                        + (f" {weapon_warning}" if weapon_warning else ""))
+                    else:
+                        self.status.set(f"Loaded {title}. Auto save: {self.save_timing.get().lower()}; F11 saves manually."
+                                        + (f" {weapon_warning}" if weapon_warning else ""))
                     self._start_watch()
                 elif kind == "new_game_started":
                     map_name = event[1]

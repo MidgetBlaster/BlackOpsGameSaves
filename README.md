@@ -97,7 +97,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.24
+python package_release.py v1.0.25
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,

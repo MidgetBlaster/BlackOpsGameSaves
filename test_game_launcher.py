@@ -1,5 +1,6 @@
 from unittest.mock import patch
 import ctypes
+import itertools
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
@@ -165,7 +166,9 @@ class FreshGame:
 
     def u32(self, address):
         return {core.COMMITTED_PTR: core.SAVE_A,
-                core.WRITE_PTR: core.SAVE_B}[address]
+                core.WRITE_PTR: core.SAVE_B,
+                core.LEVEL_FRAME_ADDR: 100,
+                core.LEVEL_TIME_ADDR: 5000}[address]
 
     def press_save(self):
         self.commands.append("F11")
@@ -196,10 +199,11 @@ assert retry_game.commands == ["F11", "F11"]
 assert [call.kwargs["timeout"] for call in wait_for_save.call_args_list] == [3, 3]
 wait_for_ready.assert_not_called()
 
-with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory"}, {})),
+with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory", "round": 4}, {})),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore") as restore_mock,
-      patch.object(game_launcher, "wait_for_focus")):
+      patch.object(game_launcher, "wait_for_focus"),
+      patch.object(game_launcher, "wait_for_loaded_round", return_value=True)):
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
 assert fresh_game.commands[-1] == "F12"
 assert restore_mock.call_args.kwargs == {"coop": True}
@@ -248,7 +252,69 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
       patch.object(game_launcher, "wait_for_focus"),
       patch.object(game_launcher, "wait_for_loaded_round", return_value=True) as loaded):
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
-loaded.assert_called_once_with(fresh_game, 4, None)
+loaded.assert_called_once_with(fresh_game, 4, None, timeout=8, before_clock=(100, 5000))
+
+
+ascension_game = FreshGame()
+with (patch.object(core, "load_archive", return_value=({
+          "map": "zombie_cosmodrome", "round": 7}, {})),
+      patch.object(game_launcher, "make_fresh_checkpoint"),
+      patch.object(core, "restore"),
+      patch.object(core, "live_round", return_value=1),
+      patch.object(game_launcher, "wait_for_focus"),
+      patch.object(game_launcher, "wait_for_map_ready") as map_ready,
+      patch.object(game_launcher, "wait_for_loaded_round", side_effect=[False, True]) as loaded):
+    restored = game_launcher.restore_and_continue(
+        ascension_game, core.ARCHIVE / "ascension.bo1checkpoint", "Solo")
+assert ascension_game.commands == ["F12", "F12"]
+assert "resume_warning" not in restored
+map_ready.assert_called_once_with(ascension_game, "zombie_cosmodrome", None,
+                                  during_opening=False, allow_stale_checkpoint=True)
+assert loaded.call_args_list[1].kwargs["timeout"] == 20
+
+
+failed_game = FreshGame()
+with (patch.object(core, "load_archive", return_value=({
+          "map": "zombie_cosmodrome", "round": 7}, {})),
+      patch.object(game_launcher, "make_fresh_checkpoint"),
+      patch.object(core, "restore"),
+      patch.object(core, "live_round", return_value=1),
+      patch.object(game_launcher, "wait_for_focus"),
+      patch.object(game_launcher, "wait_for_map_ready"),
+      patch.object(game_launcher, "wait_for_loaded_round", return_value=False)):
+    try:
+        game_launcher.restore_and_continue(
+            failed_game, core.ARCHIVE / "ascension.bo1checkpoint", "Solo")
+    except RuntimeError as error:
+        assert "stayed at round 1" in str(error)
+    else:
+        raise AssertionError("A failed Ascension Continue must be reported")
+assert failed_game.commands == ["F12", "F12"]
+
+
+class ContinueSignalGame:
+    def __init__(self, state=3):
+        self.frame = 100
+        self.state = state
+
+    def u32(self, address):
+        if address == core.LEVEL_FRAME_ADDR:
+            self.frame += 1
+            return self.frame
+        return {core.LEVEL_TIME_ADDR: 5000,
+                core.MENU_ADDR: 0,
+                core.COMMITTED_PTR: core.SAVE_A,
+                core.SAVE_A + core.STATE_OFFSET: self.state}[address]
+
+
+for observed_round, state in ((8, 3), (None, 4)):
+    signal_game = ContinueSignalGame(state)
+    ticks = itertools.count(0, 0.25)
+    with (patch.object(core, "live_round", return_value=observed_round),
+          patch.object(game_launcher.time, "monotonic", side_effect=lambda: next(ticks)),
+          patch.object(game_launcher.time, "sleep")):
+        assert game_launcher.wait_for_loaded_round(
+            signal_game, 7, timeout=8, before_clock=(100, 5000))
 
 
 class SwitchGame:

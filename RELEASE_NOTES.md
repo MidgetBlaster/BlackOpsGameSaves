@@ -1,4 +1,14 @@
-# Black Ops Game Saves v1.0.24
+# Black Ops Game Saves v1.0.25
+
+- Continue now checks whether Black Ops processed the load request. If a
+  higher-round checkpoint still appears to be at round 1, the manager waits
+  for the map to finish opening and sends Continue once more. A remaining
+  round-1 failure is reported instead of being shown as a successful load.
+- Resume detection accepts the saved round or the following round and also
+  watches the engine's save-reader state and level clock. This avoids relying
+  only on the round byte, which can be zero after Continue.
+
+## v1.0.24
 
 - New installations start with Overwrite Game Saves enabled. A New Game makes
   its first checkpoint as a new save and overwrites that save afterward.

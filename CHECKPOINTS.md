@@ -129,8 +129,11 @@ when missing or different, backing up any replaced files under
   In Solo it presses F11,
   retries during opening if the first key press was ignored, verifies the fresh
   checkpoint, briefly suspends the game to restore the selected checkpoint,
-  then presses F12 to run `loadgame_continue`. It waits for the saved round to
-  resume. For checkpoints made with the new player-options script, it then
+  then presses F12 to run `loadgame_continue`. It checks for the engine's
+  save-reader state, a level-clock change, or the saved round. If a later-round
+  save stays at round 1, it waits for the map to finish opening and retries F12
+  once. If the map still stays at round 1, the manager reports a load error.
+  For checkpoints made with the new player-options script, it then
   reads each player's equipped raw weapon ID from the checkpoint and asks GSC
   to select that weapon if the player still owns it. If a damaged checkpoint
   has no readable equipped weapon, the manager reports a warning and leaves
