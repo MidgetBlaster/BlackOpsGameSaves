@@ -55,12 +55,9 @@ def test_executable_compatibility():
                              0x3AF36C4, 0x76D000)
             executable.write_bytes(shifted)
             profile = c.memory_profile(executable)
-            assert profile["status"] == "candidate"
-            assert profile["data_delta"] == 0x1000
-            assert profile["addresses"]["COMMITTED_PTR"] == c.COMMITTED_PTR + 0x1000
-            c.configure_data_delta(0x1000)
-            assert c.COMMITTED_PTR == profile["addresses"]["COMMITTED_PTR"]
-            c.configure_data_delta(0)
+            # A shifted PE section alone cannot identify the objects inside it.
+            assert profile["status"] == "unavailable"
+            assert "signatures" in profile["reason"]
     known = c.GAME / "BlackOps.exe"
     if known.is_file() and hashlib.sha256(known.read_bytes()).hexdigest() == c.SUPPORTED_SHA256:
         assert c.executable_layout_fingerprint(known.read_bytes()) == c.SUPPORTED_LAYOUT_SHA256
@@ -81,7 +78,7 @@ class FakeGame:
             (c.PAUSED_ADDR, 4), (c.LEVEL_FRAME_ADDR, 4), (c.LEVEL_TIME_ADDR, 4),
             (c.TIMER_ADDR, 4), (c.ROUND_BYTE_ADDR, 4),
             (c.SCENE_ADDR, 4), (c.MENU_ADDR, 4), (c.MAGIC_ADDR, 4),
-            (c.ROUND_CHANGE_ADDR, 4), (c.SAVE_QUEUE, 4),
+            (c.ROUND_CHANGE_ADDR, 4), (c.SAVE_QUEUE, 3 * c.SAVE_REQUEST_SIZE),
             (c.SAVE_QUEUE_COUNT, 4), (c.ASYNC_DISK_SAVE, 4),
             (c.ASYNC_CALLBACK_SAVE, 4)]}
         self.write(c.COMMITTED_PTR, struct.pack('<I', c.SAVE_A))
@@ -121,6 +118,76 @@ class FakeGame:
         self.suspend_calls += 1
         yield
 
+def test_independent_buffers_roundtrip():
+    from test_memory_resolver import fixture
+    image, signatures, addresses = fixture(0x1800000)
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        executable = folder / "BlackOps.exe"
+        patterns = folder / "signatures.json"
+        executable.write_bytes(image)
+        patterns.write_text(json.dumps(signatures), encoding="utf-8")
+        with patch.object(c.memory_resolver, "SIGNATURES", patterns):
+            profile = c.memory_profile(executable)
+        assert profile["status"] == "candidate", profile
+        try:
+            c.configure_memory_profile(profile)
+            shifted = FakeGame()
+            shifted.profile = profile
+            shifted.executable_sha256 = profile["executable_sha256"]
+            assert c.probe_live_save_layout(shifted)
+            shifted.layout_confirmed = True
+            shifted.executable_verified = False
+            shifted.write(c.SAVE_QUEUE_COUNT, struct.pack("<I", 1))
+            shifted.write(c.ASYNC_DISK_SAVE, struct.pack("<I", c.SAVE_B))
+            shifted.write(c.SAVE_QUEUE, b"1\0")
+            shifted.write(c.SAVE_QUEUE + 0x180, struct.pack("<III", 42, 1, 6))
+            repair = c.SaveQueueUnblocker()
+            assert not repair.observe(shifted, 0)
+            shifted.write(c.LEVEL_FRAME_ADDR, struct.pack("<I", 160))
+            assert repair.observe(shifted, 4)
+            assert shifted.u32(c.ASYNC_DISK_SAVE) == 0
+            assert shifted.u32(c.SAVE_QUEUE + 0x188) == 2
+            shifted.write(c.ASYNC_DISK_SAVE, struct.pack("<I", c.SAVE_B))
+            shifted.write(c.SAVE_QUEUE + 0x184, struct.pack("<I", 99))
+            assert not repair.observe(shifted, 8)
+            assert shifted.u32(c.ASYNC_DISK_SAVE) == c.SAVE_B
+            shifted.write(c.ASYNC_DISK_SAVE, struct.pack("<I", 0))
+            shifted.write(c.SAVE_QUEUE_COUNT, struct.pack("<I", 0))
+            with patch.object(c, "ARCHIVE", folder / "saves"):
+                checkpoint = c.snapshot(shifted, 7)
+                c.configure_data_delta(0)
+                metadata, pieces = c.load_archive(checkpoint)
+                assert metadata["source_memory_profile"]["addresses"]["SAVE_A"] == addresses["SAVE_A"]
+                try:
+                    c.restore(FakeGame(), checkpoint, coop=True)
+                except RuntimeError as error:
+                    assert "different game memory profile" in str(error)
+                else:
+                    raise AssertionError("Two layouts with the same section delta were mixed")
+                c.configure_memory_profile(profile)
+                c.restore(shifted, checkpoint, coop=True)
+                assert shifted.u32(c.COMMITTED_PTR) == c.SAVE_B
+                assert shifted.read(c.BUFFERS[c.SAVE_B][0], 4) == b"SAVE"
+                # A write that silently leaves stale payload bytes must not publish a checkpoint.
+                shifted.write(c.BUFFERS[c.SAVE_A][0], b"BADD")
+                actual_write = shifted.write
+                def drop_payload(address, data):
+                    if address != c.BUFFERS[c.SAVE_A][0]:
+                        actual_write(address, data)
+                with patch.object(shifted, "write", side_effect=drop_payload):
+                    try:
+                        c.restore(shifted, checkpoint, coop=True)
+                    except RuntimeError as error:
+                        assert "payload could not be verified" in str(error)
+                    else:
+                        raise AssertionError("A stale restored payload was accepted")
+                assert shifted.u32(c.COMMITTED_PTR) == c.SAVE_B
+        finally:
+            c.configure_data_delta(0)
+
+
+test_independent_buffers_roundtrip()
 game = FakeGame()
 game.executable_verified = False
 assert c.SaveQueueUnblocker().observe(game, 0) is False

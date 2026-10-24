@@ -1,8 +1,8 @@
 """Persist BO1 Zombies' committed in-memory save across game launches.
 
 Addresses and layout: MisaDev4/bo1-zombies-decompiled, g_sp_savegame.{h,cpp}.
-An unrecognized executable may be used only after its live save layout passes
-a read-only check against the known buffer addresses and checkpoint header.
+An unrecognized executable needs matching code signatures and a live check
+of its resolved buffer addresses and checkpoint structures.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ import struct
 import sys
 import time
 import zipfile
+import memory_resolver
 
 ROOT = (Path(sys.executable) if getattr(sys, "frozen", False) else Path(__file__)).resolve().parent
 GAME = ROOT.parent.parent
@@ -83,9 +84,8 @@ MAP_SCENES = {
     "zombie_cod5_factory": 204,
 }
 
-# The tested executable places these objects in one large .data section.
-# Another build may move the whole section; its internal offsets still have
-# to be confirmed against a live checkpoint before memory writes are allowed.
+# Legacy archives identify a whole-section shift. New profiles resolve each
+# symbol from code references and record the full table with the checkpoint.
 TESTED_DATA_BASE = 0x00B6C000
 PROFILE_FILE = ROOT / "memory_profile.json"
 DATA_DELTA = 0
@@ -134,7 +134,7 @@ def memory_profile(executable: Path) -> dict:
     """Prepare a file-bound profile; unknown builds need live verification."""
     data = Path(executable).read_bytes()
     digest = hashlib.sha256(data).hexdigest()
-    profile = {"format": 1, "executable_sha256": digest, "size": len(data),
+    profile = {"format": 2, "executable_sha256": digest, "size": len(data),
                "status": "unavailable", "data_delta": None}
     section = pe_data_section(data)
     if section is None:
@@ -143,21 +143,9 @@ def memory_profile(executable: Path) -> dict:
     image_base, data_rva, data_size = section
     data_base = image_base + data_rva
     delta = data_base - TESTED_DATA_BASE
-    offsets = [address - TESTED_DATA_BASE for address in _TESTED_ADDRESSES.values()]
-    offsets.extend(address - TESTED_DATA_BASE for pair in _TESTED_BUFFERS.values()
-                   for address in pair)
-    if (image_base != BASE or min(offsets) < 0 or
-            max(offsets) + 4 > data_size or
-            any(not 0 < address + delta < 0x80000000
-                for address in (*_TESTED_ADDRESSES.values(),
-                                *(item for pair in _TESTED_BUFFERS.values() for item in pair)))):
-        profile["reason"] = "Game image base or .data range differs from the supported layout"
-        return profile
-    profile.update({"status": "candidate", "image_base": image_base,
+    profile.update({"image_base": image_base,
                     "data_rva": data_rva, "data_size": data_size,
-                    "data_delta": delta,
-                    "addresses": {name: address + delta
-                                  for name, address in _TESTED_ADDRESSES.items()}})
+                    "data_delta": delta})
     if (digest == SUPPORTED_SHA256 or
             executable_layout_fingerprint(data) == SUPPORTED_LAYOUT_SHA256):
         if delta != 0:
@@ -166,7 +154,83 @@ def memory_profile(executable: Path) -> dict:
             profile["data_delta"] = None
         else:
             profile["status"] = "verified_file"
+            profile["method"] = "tested_layout"
+            profile["addresses"] = dict(_TESTED_ADDRESSES)
+            profile["buffers"] = {str(address): list(pair) for address, pair in _TESTED_BUFFERS.items()}
+    else:
+        try:
+            resolved = memory_resolver.resolve(data)
+            profile["addresses"] = {name: resolved[name] for name in PROFILE_ADDRESSES}
+            profile["buffers"] = {
+                str(resolved[name]): [resolved[f"BUFFER_{index}_{part}"] for part in range(2)]
+                for index, name in enumerate(("SAVE_A", "SAVE_B"))}
+            profile["method"] = "code_signatures"
+            profile["status"] = "candidate"
+        except (OSError, ValueError, KeyError) as error:
+            profile["reason"] = f"Could not resolve this build's memory addresses: {error}"
+            return profile
+    if profile["status"] != "unavailable":
+        try:
+            validate_profile_layout(profile)
+            profile["layout_id"] = profile_layout_id(profile)
+        except (ValueError, KeyError, TypeError) as error:
+            profile["status"] = "unavailable"
+            profile["reason"] = f"Invalid resolved memory layout: {error}"
     return profile
+
+
+def profile_layout_id(profile: dict) -> str:
+    layout = {"addresses": profile["addresses"], "buffers": profile["buffers"],
+              "save_size": SAVE_SIZE, "buffer_sizes": BUFFER_SIZES}
+    return hashlib.sha256(json.dumps(layout, sort_keys=True).encode("ascii")).hexdigest()
+
+
+def validate_profile_layout(profile: dict):
+    if not isinstance(profile, dict):
+        raise ValueError("Expected an address profile")
+    addresses = profile["addresses"]
+    if not isinstance(addresses, dict) or set(addresses) != set(PROFILE_ADDRESSES):
+        raise ValueError("Incomplete address table")
+    low = profile["image_base"] + profile["data_rva"]
+    high = low + profile["data_size"]
+    if not 0x10000 <= low < high <= 0x80000000:
+        raise ValueError("Invalid game data range")
+    if any(type(value) is not int or not low <= value <= high - 4
+           for value in addresses.values()):
+        raise ValueError("Address outside game data")
+    if addresses["WRITE_PTR"] != addresses["COMMITTED_PTR"] + 4:
+        raise ValueError("Save pointer table layout changed")
+    buffers = profile["buffers"]
+    if (not isinstance(buffers, dict) or
+            set(buffers) != {str(addresses["SAVE_A"]), str(addresses["SAVE_B"])} or len(buffers) != 2):
+        raise ValueError("Expected two distinct checkpoint buffers")
+    regions = []
+    for address, pair in buffers.items():
+        if not isinstance(pair, list) or len(pair) != 2:
+            raise ValueError("Incomplete checkpoint payload addresses")
+        regions.append((int(address), int(address) + SAVE_SIZE))
+        for pointer, size in zip(pair, BUFFER_SIZES):
+            if type(pointer) is not int:
+                raise ValueError("Invalid payload address")
+            regions.append((pointer, pointer + size))
+    regions.sort()
+    if (any(start < low or end > high for start, end in regions) or
+            any(left[1] > right[0] for left, right in zip(regions, regions[1:]))):
+        raise ValueError("Checkpoint buffers overlap or leave game data")
+    for name, address in addresses.items():
+        if name not in ("SAVE_A", "SAVE_B") and any(
+                start < address + 4 and address < end for start, end in regions):
+            raise ValueError(f"{name} overlaps a checkpoint buffer")
+
+
+def configure_memory_profile(profile: dict):
+    """Use the resolved per-symbol table, including independently moved buffers."""
+    global DATA_DELTA, BUFFERS
+    validate_profile_layout(profile)
+    DATA_DELTA = profile["data_delta"]
+    for name, value in profile["addresses"].items():
+        globals()[name] = value
+    BUFFERS = {int(address): tuple(pair) for address, pair in profile["buffers"].items()}
 
 
 def configure_data_delta(delta: int):
@@ -256,7 +320,7 @@ def verify_game_executable(executable: Path) -> str:
 
 
 def probe_live_save_layout(game) -> bool:
-    """Read-only check for the known save layout in a differently hashed build.
+    """Read-only check for the resolved save layout in a differently hashed build.
 
     A fresh process may not have constructed its save buffers yet. In that
     case, wait for a committed checkpoint before allowing any memory writes.
@@ -351,15 +415,17 @@ class GameProcess:
             if PROFILE_FILE.is_file():
                 installed = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
                 if (installed.get("executable_sha256") != self.profile["executable_sha256"] or
-                        installed.get("data_delta") != self.profile["data_delta"]):
+                        installed.get("data_delta") != self.profile["data_delta"] or
+                        (installed.get("layout_id") is not None and
+                         installed["layout_id"] != self.profile["layout_id"])):
                     raise RuntimeError("BlackOps.exe changed since installation. Reinstall Game Save to build its memory profile.")
-            configure_data_delta(self.profile["data_delta"])
+            configure_memory_profile(self.profile)
             self.executable_sha256 = self.profile["executable_sha256"]
             self.executable_verified = self.profile["status"] == "verified_file"
             self.layout_confirmed = self.executable_verified
             self.compatibility_error = (None if self.executable_verified else
                                         "This game build needs live checkpoint verification before memory writes")
-            if self.read(BASE, 2) != b"MZ":
+            if self.read(self.profile["image_base"], 2) != b"MZ":
                 raise RuntimeError("The game image is not at the expected base address")
             if not self.layout_confirmed:
                 try:
@@ -554,12 +620,17 @@ def header_info(image: bytes) -> dict:
             "secondary_size": struct.unpack_from("<I", h, 0x494)[0]}
 
 
-def validate_image(address: int, image: bytes, data_delta: int | None = None) -> dict:
-    delta = DATA_DELTA if data_delta is None else data_delta
-    if not isinstance(delta, int) or abs(delta) > 0x40000000:
-        raise RuntimeError("The checkpoint has an invalid memory profile")
-    expected_buffers = {base + delta: tuple(item + delta for item in pair)
-                        for base, pair in _TESTED_BUFFERS.items()}
+def validate_image(address: int, image: bytes, data_delta: int | None = None,
+                   *, buffers: dict | None = None) -> dict:
+    if buffers is not None:
+        expected_buffers = buffers
+    elif data_delta is None:
+        expected_buffers = BUFFERS
+    else:
+        if type(data_delta) is not int or abs(data_delta) > 0x40000000:
+            raise RuntimeError("The checkpoint has an invalid memory profile")
+        expected_buffers = {base + data_delta: tuple(item + data_delta for item in pair)
+                            for base, pair in _TESTED_BUFFERS.items()}
     if address not in expected_buffers or len(image) != SAVE_SIZE:
         raise RuntimeError("Unexpected save buffer address or size")
     expected = expected_buffers[address]
@@ -606,6 +677,9 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
                 "source_data_delta": DATA_DELTA,
                 "save_address": address, "round": round_number,
                 "saved_at": datetime.now().astimezone().isoformat(), **h}
+    if getattr(game, "profile", None):
+        metadata["source_memory_profile"] = {name: game.profile[name] for name in (
+            "image_base", "data_rva", "data_size", "data_delta", "addresses", "buffers")}
     options_script = ROOT / "maps" / "_checkpoint_coop_pause.gsc"
     options_variant = (ROOT / "scriptdata" / "checkpoint_variants" /
                        "_checkpoint_coop_pause_v2.gsc")
@@ -626,6 +700,7 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
             archive.writestr("manifest.json", json.dumps(metadata, indent=2))
             for name, data in pieces.items():
                 archive.writestr(name, data)
+        load_archive(temporary)  # Verify the written archive before publishing it to the UI.
         os.replace(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
@@ -655,8 +730,17 @@ def load_archive(path: Path) -> tuple[dict, dict[str, bytes]]:
     for name, data in pieces.items():
         if hashlib.sha256(data).hexdigest() != metadata["sha256"].get(name):
             raise RuntimeError(f"Checkpoint integrity check failed: {name}")
+    source_profile = metadata.get("source_memory_profile")
+    source_buffers = None
+    if source_profile is not None:
+        try:
+            validate_profile_layout(source_profile)
+            source_buffers = {int(address): tuple(pair)
+                              for address, pair in source_profile["buffers"].items()}
+        except (TypeError, ValueError, KeyError) as error:
+            raise RuntimeError(f"Invalid checkpoint memory profile: {error}") from error
     h = validate_image(metadata["save_address"], pieces["save.bin"],
-                       metadata.get("source_data_delta", 0))
+                       metadata.get("source_data_delta", 0), buffers=source_buffers)
     if any(metadata.get(key) != h[key] for key in ("map", "map_checksum", "script_checksums", "save_id")):
         raise RuntimeError("Checkpoint manifest does not match its save header")
     return metadata, pieces
@@ -671,7 +755,15 @@ def latest_archive() -> Path:
 
 def restore(game: GameProcess, path: Path, coop: bool = False):
     metadata, pieces = load_archive(path)
-    if metadata.get("source_data_delta", 0) != DATA_DELTA:
+    source_profile = metadata.get("source_memory_profile")
+    if source_profile is None:
+        delta = metadata.get("source_data_delta", 0)
+        source_profile = {"addresses": {name: value + delta for name, value in _TESTED_ADDRESSES.items()},
+                          "buffers": {str(base + delta): [value + delta for value in pair]
+                                      for base, pair in _TESTED_BUFFERS.items()}}
+    active_profile = {"addresses": {name: globals()[name] for name in PROFILE_ADDRESSES},
+                      "buffers": {str(base): list(pair) for base, pair in BUFFERS.items()}}
+    if profile_layout_id(source_profile) != profile_layout_id(active_profile):
         raise RuntimeError("This checkpoint uses a different game memory profile. "
                            "Loading it into this build is not supported.")
     # A co-op server cannot be paused through the menu. Its process must be
@@ -705,6 +797,8 @@ def restore(game: GameProcess, path: Path, coop: bool = False):
         try:
             for data, destination in zip((pieces["state.bin"], pieces["secondary.bin"]), BUFFERS[target]):
                 game.write(destination, data)
+                if game.read(destination, len(data)) != data:
+                    raise RuntimeError("Restored checkpoint payload could not be verified")
             game.write(target, image)
             if game.read(target, SAVE_SIZE) != image:
                 raise RuntimeError("Restored checkpoint could not be verified")
@@ -901,7 +995,9 @@ class SaveQueueUnblocker:
         self.first_frame = None
 
     def observe(self, game: GameProcess, now: float) -> bool:
-        if not getattr(game, "executable_verified", True):
+        resolved_layout = (getattr(game, "layout_confirmed", False) and
+                           getattr(game, "profile", {}).get("method") == "code_signatures")
+        if not getattr(game, "executable_verified", True) and not resolved_layout:
             return False
         count = game.u32(SAVE_QUEUE_COUNT)
         pointer = game.u32(ASYNC_DISK_SAVE)
@@ -914,6 +1010,15 @@ class SaveQueueUnblocker:
             return False
         ids = tuple(game.u32(SAVE_QUEUE + index * SAVE_REQUEST_SIZE + 0x180)
                     for index in range(count))
+        def expected_requests():
+            return all(
+                game.read(SAVE_QUEUE + index * SAVE_REQUEST_SIZE, 64).split(b"\0", 1)[0] == b"1" and
+                game.u32(SAVE_QUEUE + index * SAVE_REQUEST_SIZE + 0x184) == 1 and
+                game.u32(SAVE_QUEUE + index * SAVE_REQUEST_SIZE + 0x188) in (2, 6)
+                for index in range(count))
+        if not expected_requests():
+            self.signature = self.since = self.first_frame = None
+            return False
         signature = (pointer, ids)
         if signature != self.signature:
             self.signature, self.since = signature, now
@@ -925,7 +1030,7 @@ class SaveQueueUnblocker:
             if (game.u32(ASYNC_DISK_SAVE) != pointer or
                     game.u32(pointer + STATE_OFFSET) != 0 or
                     game.read(pointer + CALLBACK_NOW_OFFSET, 1) != b"\0" or
-                    game.u32(SAVE_QUEUE_COUNT) != count or
+                    game.u32(SAVE_QUEUE_COUNT) != count or not expected_requests() or
                     any(game.u32(SAVE_QUEUE + index * SAVE_REQUEST_SIZE + 0x180) != ids[index]
                         for index in range(count))):
                 self.signature = self.since = self.first_frame = None

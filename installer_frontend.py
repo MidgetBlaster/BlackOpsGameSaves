@@ -271,13 +271,13 @@ class Installer(tk.Tk):
                  bg="#141414", fg="#aaaaaa", font=("Segoe UI", 10)).pack(anchor="w")
         profile_status = result.get("profile_status", "verified_file")
         profile_label = {"verified_file": "Memory profile: verified for this executable",
-                         "candidate": "Memory profile: candidate; live check required",
+                         "candidate": "Game addresses found; checkpoint check runs in game",
                          "unavailable": "Memory profile: unavailable for this executable"}[profile_status]
         tk.Label(body, text=profile_label, bg="#141414",
                  fg="#d5d5d5" if profile_status == "verified_file" else "#e5b96a",
                  font=("Segoe UI", 10)).pack(anchor="w", pady=(8, 0))
         if result.get("compatibility") == "unverified":
-            warning = ("A candidate address profile was saved. The manager will verify the running game's checkpoint structures before memory writes."
+            warning = ("Addresses were located from this executable's code and saved for the manager. The first committed checkpoint must confirm its save structures before loading a saved game."
                        if profile_status == "candidate" else
                        "The selected executable did not provide a usable address candidate. Memory saves need a supported build profile.")
             tk.Label(body,

@@ -1,4 +1,19 @@
-# Black Ops Game Saves v1.0.25
+# Black Ops Game Saves v1.0.26
+
+- Installation resolves checkpoint and tracking addresses from unique code
+  signatures in the selected BlackOps.exe. The profile includes individual
+  addresses and payload buffers, supporting independently moved save buffers.
+  Unrecognized or ambiguous code still requires a supported profile; a hash
+  or a shifted PE section alone is no longer treated as address evidence.
+- The manager checks the profile against the running checkpoint. New saves
+  retain that profile and are read back from disk before appearing in the UI.
+  Restore verifies both payload writes and rejects a different source layout.
+- Stalled devsave queue recovery can run on a signature-resolved build after
+  live verification and only when the pending requests match the known format.
+- An unconfirmed Continue now reports an error instead of marking the selected
+  checkpoint as loaded and making it the overwrite target.
+
+## v1.0.25
 
 - Continue now checks whether Black Ops processed the load request. If a
   higher-round checkpoint still appears to be at round 1, the manager waits

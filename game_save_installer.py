@@ -27,6 +27,7 @@ MOD_FILES = (
     "checkpoint.py", "checkpoint_gui.py", "checkpoint_memory.py",
     "checkpoint_stats.py", "save_library.py", "game_launcher.py",
     "fov_keeper.py", "steam_identity.py",
+    "memory_resolver.py", "memory_signatures.json",
     "game_save_installer.py", "checkpoint.cfg", "checkpoint_speed.cfg",
     "checkpoint_speed_local.cfg", "checkpoint_power.cfg", "checkpoint_borderless.cfg",
     "checkpoint_fullscreen.cfg", "display_mode.py", "CHECKPOINTS.md",
@@ -173,6 +174,8 @@ def install(source: Path, game: Path, package: Path | None = None,
     executable = game / "BlackOps.exe"
     if not executable.is_file():
         raise FileNotFoundError(f"BlackOps.exe was not found in {game}")
+    if progress:
+        progress("Locating checkpoint addresses in the selected BlackOps.exe", 0)
     profile = core.memory_profile(executable)
     executable_size = profile["size"]
     executable_sha256 = profile["executable_sha256"]

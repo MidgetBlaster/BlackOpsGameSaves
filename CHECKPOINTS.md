@@ -15,16 +15,18 @@ Resource and packaging differences are allowed when that check matches. The
 installer also copies the files for an untested executable and displays its
 SHA-256 and size. The running manager then checks the known save pointers and
 committed checkpoint header without writing memory. It permits memory writes
-only after that live layout is verified. A build with different addresses
-gets a candidate address profile if its PE data section moved as a whole.
-The installer writes this to `mods/Game Save/memory_profile.json`; a live
-checkpoint must confirm the candidate before it is used. A build whose
-internal data layout changed still needs its own verified profile. The hash
-of the installer or save manager cannot provide those addresses. Checkpoints
-record their source data-section shift and are not restored across different
-address profiles.
-FoV writes and the stalled-save-queue repair stay off on an untested build
-because their addresses are independent of the save buffer layout.
+only after that live layout is verified. Installation searches the selected
+executable for unique code signatures and writes the individual addresses and
+payload buffers to `mods/Game Save/memory_profile.json`. This can locate save
+buffers that moved independently of other game data. Fields within larger
+objects use two surrounding references that must agree on their position.
+Missing or ambiguous signatures, or changed internal structures, still need
+a supported profile. A file hash alone cannot provide those addresses.
+New checkpoints record the full source profile; older checkpoints retain
+their section-shift compatibility. Different layouts cannot be mixed.
+FoV writes stay off on an untested code layout. Stalled-save-queue recovery
+also works with signature-resolved addresses after live checkpoint verification
+and checks the pending request format before making changes.
 This is a process-memory tool for the retail game, not a build of the
 decompiled executable. It never uses `players/save/*.svg`.
 
@@ -132,7 +134,8 @@ when missing or different, backing up any replaced files under
   then presses F12 to run `loadgame_continue`. It checks for the engine's
   save-reader state, a level-clock change, or the saved round. If a later-round
   save stays at round 1, it waits for the map to finish opening and retries F12
-  once. If the map still stays at round 1, the manager reports a load error.
+  once. If loading cannot be confirmed, the manager reports a load error and
+  does not make the selected save the overwrite target.
   For checkpoints made with the new player-options script, it then
   reads each player's equipped raw weapon ID from the checkpoint and asks GSC
   to select that weapon if the player still owns it. If a damaged checkpoint

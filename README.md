@@ -79,14 +79,18 @@ The manager also accepts a different file when its mapped game code and data
 are identical. For another build, the installer completes and displays the
 `BlackOps.exe` hash and size. At runtime the manager reads the save pointers,
 buffer header, and map identity before permitting memory writes. Installation
-creates `mods\Game Save\memory_profile.json` for the selected executable. If
-its PE data section moved as a whole, the manager derives candidate addresses
-and verifies them against a live checkpoint before using them. An internal
-layout change cannot be inferred from the hash and still needs a verified
-profile. Saves record their source profile and cannot be restored across
-different address layouts.
-FoV memory writes and the stalled-save-queue repair stay disabled on an
-untested executable because those features use separate addresses.
+creates `mods\Game Save\memory_profile.json` for the selected executable.
+Unique code signatures resolve individual save pointers, buffers, and clock
+addresses. Tracking fields inside larger objects use two surrounding code
+references whose offsets must agree. The manager checks the resulting
+candidate against a live checkpoint before memory writes. This supports
+independently moved save buffers when the code patterns and structure layouts
+still match. It does not guarantee support for every patched, packed, or
+different game build. Missing or ambiguous matches need a supported profile.
+New saves record their full source profile and cannot be restored across
+different address layouts. FoV remains limited to the tested code layout.
+Save-queue recovery also supports signature-resolved profiles after live
+verification and checks the pending request format before changing it.
 Co-op restore still needs a live test with the same host and players. See
 [CHECKPOINTS.md](CHECKPOINTS.md) for usage details and current limits.
 
@@ -97,7 +101,7 @@ Use Python 3.14 on Windows and install PyInstaller:
 ```powershell
 python -m pip install pyinstaller==6.21.0
 python build_release.py
-python package_release.py v1.0.25
+python package_release.py v1.0.26
 ```
 
 The build script produces `BlackOpsGameSaves.exe` and one installer,
@@ -114,7 +118,14 @@ python test_checkpoint_gallery.py
 python test_game_save_installer.py
 python test_game_launcher.py
 python test_fov_keeper.py
+python test_memory_resolver.py
+python test_checkpoint_memory.py
 ```
+
+The bundled `memory_signatures.json` is used by both the installer and manager.
+Maintainers can regenerate it from the tested executable with
+`python generate_memory_signatures.py` after installing Capstone. The game
+executable is not bundled; regeneration refuses an untested input.
 
 ## Publishing
 

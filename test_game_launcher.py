@@ -291,6 +291,20 @@ with (patch.object(core, "load_archive", return_value=({
         raise AssertionError("A failed Ascension Continue must be reported")
 assert failed_game.commands == ["F12", "F12"]
 
+with (patch.object(core, "load_archive", return_value=({"map": "zombie_cosmodrome", "round": 7}, {})),
+      patch.object(game_launcher, "make_fresh_checkpoint"),
+      patch.object(core, "restore"),
+      patch.object(core, "live_round", return_value=None),
+      patch.object(game_launcher, "wait_for_focus"),
+      patch.object(game_launcher, "wait_for_map_ready"),
+      patch.object(game_launcher, "wait_for_loaded_round", return_value=False)):
+    try:
+        game_launcher.restore_and_continue(FreshGame(), core.ARCHIVE / "unknown.bo1checkpoint", "Solo")
+    except RuntimeError as error:
+        assert "did not confirm" in str(error)
+    else:
+        raise AssertionError("An unconfirmed Continue must not arm the selected overwrite target")
+
 
 class ContinueSignalGame:
     def __init__(self, state=3):

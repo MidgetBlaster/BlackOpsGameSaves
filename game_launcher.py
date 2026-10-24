@@ -388,9 +388,10 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
                     "The checkpoint is still available; check the Black Ops console "
                     "for a load error before trying again.")
     if not resumed:
-        metadata["resume_warning"] = (
-            "The Continue command was sent, but the game did not confirm the resumed "
-            "checkpoint. Check its round before playing on.")
+        raise RuntimeError(
+            "Black Ops did not confirm that the selected checkpoint resumed. "
+            "The saved file has been kept. Check the game console for a load error "
+            "and retry Continue after the map is playable.")
     if weapon_config:
         wait_for_focus(game, cancel)
         game.press_game_key(0x73, "F4 equipped weapon restore")

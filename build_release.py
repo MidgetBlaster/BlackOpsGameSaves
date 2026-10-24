@@ -53,10 +53,12 @@ def main():
     RELEASE = parser.parse_args().output.resolve()
     RELEASE.mkdir(exist_ok=True)
     build("BlackOpsGameSaves", "checkpoint_gui.py", [(ICON, "."),
+                                                    (ROOT / "memory_signatures.json", "."),
                                                     (ROOT / "ui fonts", "ui fonts")])
     payload = payload_zip()
     build("InstallBlackOpsGameSaves", "install_blackops_game_saves.py",
-          [(payload, "."), (RELEASE / "BlackOpsGameSaves.exe", "."), (ICON, ".")])
+          [(payload, "."), (RELEASE / "BlackOpsGameSaves.exe", "."), (ICON, "."),
+           (ROOT / "memory_signatures.json", ".")])
     for name in ("BlackOpsGameSaves", "InstallBlackOpsGameSaves"):
         executable = RELEASE / f"{name}.exe"
         print(f"{executable}: {executable.stat().st_size:,} bytes")
