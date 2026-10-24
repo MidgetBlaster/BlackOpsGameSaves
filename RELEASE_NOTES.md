@@ -1,4 +1,21 @@
-# Black Ops Game Saves v1.0.26
+# Black Ops Game Saves v1.0.27
+
+- Ascension's initial restore checkpoint waits for at least 15 seconds of
+  level time and a live round signal instead of using the opening-screen shortcut.
+- Moon's initial checkpoint waits for its first round signal. The playable
+  No Man's Land opening alone does not qualify. Continue currently requires
+  the player to take the first teleporter; the manager explains this while waiting.
+  Both zombie_moon and zombie_paris use this readiness policy.
+- Manual Continue now rearms tracking on forward clock jumps and observed
+  save-reading state, as well as clock rewinds. The matching archive supplies
+  the restored round when available. No startup archive is added.
+- Save retries await an already queued manual devsave instead of adding
+  another request. Stalled-queue recovery also runs when committed memory
+  is temporarily unavailable. Autosaves remain tied to round boundaries.
+- Existing GSC scripts and checkpoint checksums are unchanged. Automated
+  regression checks pass; the two map openings still need an in-game test.
+
+## v1.0.26
 
 - Installation resolves checkpoint and tracking addresses from unique code
   signatures in the selected BlackOps.exe. The profile includes individual

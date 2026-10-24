@@ -78,6 +78,7 @@ MAP_SCENES = {
     "zombie_coast": 28,
     "zombie_temple": 44,
     "zombie_moon": 76,
+    "zombie_paris": 76,
     "zombie_cod5_prototype": 108,
     "zombie_cod5_asylum": 140,
     "zombie_cod5_sumpf": 172,
@@ -1056,11 +1057,13 @@ def wait_for_new_save(game: GameProcess, prior_id: int, timeout: float = 12,
     unblocker = SaveQueueUnblocker()
     while time.monotonic() < deadline:
         try:
+            # Continue and the first save can temporarily invalidate committed().
+            # Queue recovery must still run while that buffer is unavailable.
+            if unblocker.observe(game, time.monotonic()):
+                print("Cleared a stalled disk write; pending checkpoints can commit to memory.", flush=True)
             address, _, h = committed(game)
             if h["save_id"] != prior_id or (prior_address in BUFFERS and address != prior_address):
                 return
-            if unblocker.observe(game, time.monotonic()):
-                print("Cleared a stalled disk write; pending checkpoints can commit to memory.", flush=True)
         except RuntimeError:
             pass
         except OSError as error:
@@ -1072,7 +1075,10 @@ def wait_for_new_save(game: GameProcess, prior_id: int, timeout: float = 12,
 
 def request_fresh_checkpoint(game: GameProcess, prior_id: int, timeout: float = 12,
                              prior_address: int | None = None):
-    game.press_save()
+    # A manual devsave may already be waiting for a simulation frame. Repeated
+    # F11 retries fill the engine's three-entry queue instead of helping it.
+    if not game.u32(SAVE_QUEUE_COUNT):
+        game.press_save()
     wait_for_new_save(game, prior_id, timeout=timeout, prior_address=prior_address)
 
 
@@ -1082,6 +1088,21 @@ def live_round(game: GameProcess) -> int | None:
         return None
     number = game.read(ROUND_BYTE_ADDR, 1)[0]
     return number if number > 0 else None
+
+
+def opening_round_ready(scene: int | None, level_time: int,
+                        round_number: int | None) -> bool:
+    """Special openings must reach the round HUD before the first checkpoint.
+
+    Ascension's round_prestart_func runs the lander intro before chalk_one_up.
+    Moon's playable opening is not evidence that its round loop has started.
+    Use the live round signal, not a guessed Moon teleport timer.
+    """
+    if scene == 20:
+        return level_time >= 15000 and round_number is not None
+    if scene == 76:
+        return round_number is not None
+    return True
 
 
 def request_and_save(game: GameProcess, round_number: int | None = None,
@@ -1157,17 +1178,24 @@ def archived_round_for_header(map_name: str, save_id: int,
 
 
 class LevelReloadTracker:
-    """Notice a same-process loadgame_continue by the map clock rewinding."""
+    """Notice Continue in either time direction, including a visible read state."""
 
     def __init__(self):
         self.frame = None
         self.level_time = None
+        self.wall_time = None
+        self.reading = False
 
-    def update(self, frame: int, level_time: int) -> bool:
+    def update(self, frame: int, level_time: int, now: float | None = None,
+               reading: bool = False) -> bool:
         rewound = (self.frame is not None and
                    (frame + 20 < self.frame or level_time + 1000 < self.level_time))
+        jumped = (now is not None and self.wall_time is not None and
+                  level_time - self.level_time > (now - self.wall_time) * 1000 + 2000)
+        began_reading = reading and not self.reading
         self.frame, self.level_time = frame, level_time
-        return rewound
+        self.wall_time, self.reading = now, reading
+        return rewound or jumped or began_reading
 
 
 def watch(start_round: int | None = None, stop_event=None, on_event=None, save_lock=None,
@@ -1249,7 +1277,13 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                     round_change = bool(game.read(ROUND_CHANGE_ADDR, 1)[0])
                     frame = game.u32(LEVEL_FRAME_ADDR)
                     level_time = game.u32(LEVEL_TIME_ADDR)
-                    if reload_tracker.update(frame, level_time):
+                    try:
+                        save_pointer = game.u32(COMMITTED_PTR)
+                        reading = (save_pointer in BUFFERS and
+                                   game.u32(save_pointer + STATE_OFFSET) == 4)
+                    except (OSError, RuntimeError, KeyError):
+                        reading = False
+                    if reload_tracker.update(frame, level_time, time.monotonic(), reading):
                         reload_pending = True
                         marker_ready = False
                         resume_manual_after = time.monotonic() + 5
@@ -1259,15 +1293,15 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                     if unblocker.observe(game, time.monotonic()):
                         print("Cleared a stalled disk write; pending checkpoints can commit to memory.", flush=True)
                     observed_round = live_round(game)
-                    if reload_pending and scene is not None and menu == 0 and timer > START_TICKS[scene]:
+                    if reload_pending and not reading and scene is not None and menu == 0 and timer > START_TICKS[scene]:
                         try:
                             reload_address, reload_image, reload_header = committed(game)
                         except (RuntimeError, OSError):
                             pass
                         else:
-                            resumed_round = (observed_round or archived_round_for_header(
+                            resumed_round = (archived_round_for_header(
                                 reload_header["map"], reload_header["save_id"],
-                                reload_image) or last_round or 1)
+                                reload_image) or observed_round or last_round or 1)
                             tracker = RoundTracker(resumed_round)
                             end_tracker = RoundEndTracker(save_timing, resumed_round)
                             skip_initial_round = resumed_round
@@ -1316,7 +1350,8 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                     elif not marker_ready:
                         last_marker = marker
                         marker_ready = True
-                    elif marker is not None and marker != last_marker and current_round is not None:
+                    elif (not reload_pending and marker is not None and
+                          marker != last_marker and current_round is not None):
                         with save_lock if save_lock is not None else nullcontext():
                             manual_path = snapshot(game, current_round)
                         print(f"Captured player F11 save: {manual_path}", flush=True)
@@ -1329,7 +1364,16 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                         next_recovery = time.monotonic() + RECOVERY_INTERVAL
                         RECOVERY_FILE.unlink(missing_ok=True)
                     now = time.monotonic()
-                    end_candidate = end_tracker.update(scene, menu, timer,
+                    opening_ready = opening_round_ready(
+                        scene, level_time, observed_round or end_tracker.round)
+                    # Do not feed intro HUD animation into round-edge detection.
+                    # Also discard pending edges from the game being replaced.
+                    if reload_pending or not opening_ready:
+                        end_tracker.pending = None
+                        tracker.pending = None
+                        end_candidate = None
+                    else:
+                        end_candidate = end_tracker.update(scene, menu, timer,
                                                        observed_round, round_change, now)
                     if end_candidate:
                         round_number, completed_round, signal = end_candidate
@@ -1345,7 +1389,8 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                             print(f"Round {completed_round} ended ({signal}); requesting checkpoint", flush=True)
                             if on_event:
                                 on_event("round_end", completed_round, None)
-                    elif observed_round is None and start_round is not None:
+                    elif (not reload_pending and opening_ready and observed_round is None
+                          and (start_round is not None or skip_initial_round is not None)):
                         fallback = tracker.update(scene, menu, timer, magic, now)
                         if fallback is not None:
                             completed_round = max(1, fallback - 1)

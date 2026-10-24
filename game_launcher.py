@@ -172,6 +172,9 @@ def wait_for_map_ready(game: core.GameProcess, map_name: str,
             playing = (menu == 0 and timer > threshold and level_time > 0 and
                        previous_frame is not None and frame > previous_frame and
                        save_region_ready and map_matches)
+            if expected_scene in (20, 76):
+                playing = playing and core.opening_round_ready(
+                    expected_scene, level_time, core.live_round(game))
             ready_samples = ready_samples + 1 if playing else 0
             if ready_samples >= (2 if during_opening else 3):
                 return
@@ -183,6 +186,8 @@ def wait_for_map_ready(game: core.GameProcess, map_name: str,
         time.sleep(0.1 if during_opening else 0.5)
     if not save_region_seen:
         raise RuntimeError(f"The {map_name} map became playable, but its save memory did not initialize. Check that the game started through game_mod.dll and try again.")
+    if expected_scene == 76:
+        raise RuntimeError("Moon has not started its first round. Use the teleporter out of No Man's Land before retrying Continue.")
     raise RuntimeError(f"The {map_name} map did not reach playable state after its opening screen")
 
 
@@ -267,6 +272,9 @@ def wait_for_focus(game: core.GameProcess, cancel: threading.Event | None = None
 
 def make_fresh_checkpoint(game: core.GameProcess, map_name: str,
                           cancel: threading.Event | None = None):
+    if core.MAP_SCENES.get(map_name) in (20, 76):
+        print("Waiting for the map's first round (Moon requires the first teleport).", flush=True)
+        wait_for_map_ready(game, map_name, cancel, allow_stale_checkpoint=True)
     # The save address can briefly become unreadable as the opening cinematic
     # hands control to the game. Do not abandon a playable map on that race.
     deadline = time.monotonic() + 20
@@ -494,10 +502,14 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
     use_legacy = legacy_scripts(metadata)
     use_enhanced = enhanced_scripts(metadata)
     use_round_bridge = round_bridge_scripts(metadata)
+    opening_hint = (" Teleport out of No Man's Land to begin round 1."
+                    if core.MAP_SCENES.get(metadata["map"]) == 76 else
+                    " Waiting for the lander intro and first round."
+                    if metadata["map"] == "zombie_cosmodrome" else "")
     running_pid = core.game_pid()
     if running_pid:
         if report:
-            report(f"Starting {metadata['map']} in the running game...")
+            report(f"Starting {metadata['map']} in the running game...{opening_hint}")
         game = core.GameProcess(running_pid, write=True, suspend=True)
         try:
             # Restart the map even when it already matches. Loading directly
@@ -532,7 +544,7 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
     while True:
         try:
             if report:
-                report("Waiting for the map's save system during its opening screen...")
+                report("Waiting for the map's save system..." + opening_hint)
             wait_for_map_ready(game, metadata["map"], cancel,
                                timeout=max(0, deadline - time.monotonic()),
                                during_opening=True)

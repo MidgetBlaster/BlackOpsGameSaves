@@ -243,3 +243,41 @@ assert reload.update(20, 1000)
 assert not reload.update(30, 1500)
 
 print("Automatic rounds and player F11 capture passed")
+
+# Special map openings do not use the ordinary early-black-screen shortcut.
+for scene in (20, 76):
+    assert not core.opening_round_ready(scene, 60000, None)
+assert not core.opening_round_ready(20, 14999, 1)
+assert core.opening_round_ready(20, 15000, 1)
+assert core.opening_round_ready(76, 60000, 1)
+assert core.opening_round_ready(204, 100, None)
+assert core.MAP_SCENES['zombie_paris'] == core.MAP_SCENES['zombie_moon']
+
+reload = core.LevelReloadTracker()
+assert not reload.update(100, 5000, 0)
+assert not reload.update(120, 6000, 1)
+assert reload.update(500, 25000, 2)  # manual Continue to a later checkpoint
+assert not reload.update(520, 26000, 3)
+assert reload.update(521, 26050, 3.1, reading=True)
+assert not reload.update(521, 26050, 3.2, reading=True)
+assert not reload.update(522, 26100, 3.3)
+assert reload.update(10, 500, 4)  # earlier checkpoint
+
+# A queued manual request is awaited rather than adding another F11 request.
+from unittest.mock import Mock
+queued = Mock()
+queued.u32.return_value = 1
+with patch.object(core, 'wait_for_new_save') as wait:
+    core.request_fresh_checkpoint(queued, 4)
+    queued.press_save.assert_not_called()
+    wait.assert_called_once()
+
+# Queue repair must still run when the committed buffer is transiently absent.
+with (patch.object(core, 'committed', side_effect=[RuntimeError('loading'),
+        (core.SAVE_A, b'', {'save_id': 5})]),
+      patch.object(core, 'SaveQueueUnblocker') as recovery,
+      patch.object(core.time, 'sleep')):
+    recovery.return_value.observe.return_value = False
+    core.wait_for_new_save(queued, 4)
+    assert recovery.return_value.observe.call_count == 2
+print('Special openings, bidirectional Continue and queued manual saves passed')

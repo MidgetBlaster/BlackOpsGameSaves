@@ -166,6 +166,7 @@ class FreshGame:
 
     def u32(self, address):
         return {core.COMMITTED_PTR: core.SAVE_A,
+                core.SAVE_QUEUE_COUNT: 0,
                 core.WRITE_PTR: core.SAVE_B,
                 core.LEVEL_FRAME_ADDR: 100,
                 core.LEVEL_TIME_ADDR: 5000}[address]
@@ -416,3 +417,14 @@ switch.assert_called_once_with(switch_game, "zombie_cod5_factory", None,
 assert ready.call_args.kwargs == {"during_opening": False, "allow_stale_checkpoint": True}
 
 print("Launcher readiness and bound save/load keys passed")
+
+for map_name in ('zombie_cosmodrome', 'zombie_moon', 'zombie_paris'):
+    special = FakeGame()
+    special.states = [(0, 1000 + i, 400 + i, 14000 + i * 1000)
+                      for i in range(16)]
+    with (patch.object(core, 'committed', side_effect=RuntimeError('No save yet')),
+          patch.object(core, 'live_round', side_effect=lambda _: 1 if special.sample >= 10 else None),
+          patch.object(game_launcher.time, 'sleep')):
+        game_launcher.wait_for_map_ready(special, map_name, during_opening=True)
+    assert special.sample >= 11, 'Special intro was bypassed by opening shortcut'
+print('Ascension and Moon first-checkpoint readiness passed')
