@@ -38,8 +38,10 @@ class FakeGame:
 def exercise(player_f11, skip_initial_round=None, manual_tick=1,
              advance_round=True, advance_again=False, round_end_tick=None,
              missing_round=False, magic_transition=False, start_round=None,
-             manual_continue=False, save_timing="End of Rounds"):
+             manual_continue=False, save_timing="End of Rounds",
+             initial_round=4, transition_byte=1, advance_after_manual=False):
     game = FakeGame()
+    game.round = initial_round
     clock = [0.0]
     events = []
 
@@ -66,12 +68,12 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
                 game.round_change = False
             if player_f11 and self.ticks == manual_tick:
                 game.save_id += 1
-            if advance_round and not player_f11 and self.ticks == 3:
-                game.round = 5
+            if advance_round and (not player_f11 or advance_after_manual) and self.ticks == 3:
+                game.round = initial_round + 1
             if advance_again and self.ticks == 5:
                 game.round = 6
             if round_end_tick == self.ticks:
-                game.round_change = True
+                game.round_change = transition_byte
             if magic_transition and self.ticks == 2:
                 game.magic = 2000
             if magic_transition and self.ticks == 3:
@@ -281,3 +283,14 @@ with (patch.object(core, 'committed', side_effect=[RuntimeError('loading'),
     core.wait_for_new_save(queued, 4)
     assert recovery.return_value.observe.call_count == 2
 print('Special openings, bidirectional Continue and queued manual saves passed')
+
+# A player-created round-one save must not mark that round's automatic
+# boundary as completed, regardless of the selected timing policy.
+for timing in core.SAVE_TIMINGS:
+    events = exercise(player_f11=True, initial_round=1,
+                      advance_after_manual=True, save_timing=timing)
+    assert captures(events) == [('manual', 1), ('saved', 2)], (timing, events)
+assert captures(exercise(player_f11=True, initial_round=1,
+                         advance_round=False, round_end_tick=3,
+                         transition_byte=255)) == [('manual', 1), ('saved', 1)]
+print('Round-one manual save followed by automatic save passed')

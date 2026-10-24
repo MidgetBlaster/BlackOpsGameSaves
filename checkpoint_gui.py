@@ -192,7 +192,7 @@ class CheckpointApp(tk.Tk):
         if core.game_pid() is None:
             try:
                 game_launcher.prepare_script_variant(legacy=False, enhanced=True,
-                                                     round_bridge=True)
+                                                     round_bridge=True, map_state=True)
             except (OSError, RuntimeError) as error:
                 self.status.set(f"Could not prepare the pause script: {error}")
         self.save_policy = tk.StringVar(value=self.library.data.get("save_policy", "Keep new saves"))

@@ -28,6 +28,7 @@ MOD_FILES = (
     "checkpoint_stats.py", "save_library.py", "game_launcher.py",
     "fov_keeper.py", "steam_identity.py",
     "memory_resolver.py", "memory_signatures.json",
+    "plutonium_support.py",
     "game_save_installer.py", "checkpoint.cfg", "checkpoint_speed.cfg",
     "checkpoint_speed_local.cfg", "checkpoint_power.cfg", "checkpoint_borderless.cfg",
     "checkpoint_fullscreen.cfg", "display_mode.py", "CHECKPOINTS.md",
@@ -303,4 +304,7 @@ def install_all(source: Path, game: Path, manager: Path, icon: Path,
         result["app_files"] += _copy_if_changed(asset, target / name)
         if progress:
             progress(f"mods/Game Save/{name}", 0.9 + index * 0.05)
+    import plutonium_support
+    result["plutonium_target"] = plutonium_support.install_mod(
+        target, Path(game), manager, icon, _copy_if_changed)
     return result

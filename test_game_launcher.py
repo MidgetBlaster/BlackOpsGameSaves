@@ -69,7 +69,7 @@ with TemporaryDirectory(dir=core.ROOT) as directory:
         assert options_script.read_bytes() == b"old options"
         game_launcher.prepare_script_variant(legacy=False, enhanced=True)
         assert options_script.read_bytes() == b"new options"
-        game_launcher.prepare_script_variant(legacy=False, enhanced=True, round_bridge=True)
+        game_launcher.prepare_script_variant(legacy=False, enhanced=True, round_bridge=True, map_state=True)
         assert options_script.read_bytes() == b"round bridge options"
     with (patch.object(core, "ROOT", folder),
           patch.object(game_launcher, "extract_players", return_value=[
@@ -83,9 +83,9 @@ with TemporaryDirectory(dir=core.ROOT) as directory:
         assert "bad;quit" not in commands
         assert "checkpoint_restore_token" in commands
         game_launcher.power_restore_config(True)
-        assert (folder / "checkpoint_power.cfg").read_text() == (
+        assert (folder / "checkpoint_power.cfg").read_text().startswith(
             "set checkpoint_restore_power_on 1\n")
-        assert (folder / "mods" / folder.name / "checkpoint_power.cfg").read_text() == (
+        assert (folder / "mods" / folder.name / "checkpoint_power.cfg").read_text().startswith(
             "set checkpoint_restore_power_on 1\n")
 try:
     game_launcher.launch_command("factory;quit")
@@ -233,7 +233,7 @@ with (patch.object(core, "load_archive", return_value=({
       patch.object(game_launcher, "wait_for_loaded_round", return_value=True),
       patch.object(game_launcher.time, "sleep")):
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
-power_config.assert_called_once_with(True)
+power_config.assert_called_once_with(True, map_state=False)
 assert fresh_game.commands[:3] == [
     (0x71, "F2 restore power state before Continue"), "F12",
     (0x71, "F2 restore power state during Continue")]
@@ -270,7 +270,7 @@ with (patch.object(core, "load_archive", return_value=({
 assert ascension_game.commands == ["F12", "F12"]
 assert "resume_warning" not in restored
 map_ready.assert_called_once_with(ascension_game, "zombie_cosmodrome", None,
-                                  during_opening=False, allow_stale_checkpoint=True)
+                                  during_opening=True, allow_stale_checkpoint=True)
 assert loaded.call_args_list[1].kwargs["timeout"] == 20
 
 
@@ -363,7 +363,7 @@ with (patch.object(core, "game_pid", return_value=4420),
       patch.object(game_launcher, "wait_for_map_ready") as ready):
     game_launcher.switch_running_map(switch_game, "zombie_cod5_factory")
 assert switch_game.commands == ["F10"]
-prepare.assert_called_once_with(legacy=False, enhanced=False, round_bridge=False)
+prepare.assert_called_once_with(legacy=False, enhanced=False, round_bridge=False, map_state=False)
 assert not (core.ROOT / "checkpoint_switch.cfg").exists()
 assert not (core.ROOT / "mods" / "devcommands" / "checkpoint_switch.cfg").exists()
 assert ready.call_args.kwargs == {"during_opening": True, "allow_stale_checkpoint": True}
@@ -390,7 +390,7 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
     same_map, _ = game_launcher.start_selected_game(core.ARCHIVE / "sample.bo1checkpoint", "Solo")
 assert same_map is switch_game
 switch.assert_called_once_with(switch_game, "zombie_cod5_factory", None,
-                               legacy=False, enhanced=False, round_bridge=False)
+                               legacy=False, enhanced=False, round_bridge=False, map_state=False)
 
 replacement_game = object()
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory"}, {})),
@@ -413,7 +413,7 @@ with (patch.object(core, "game_pid", return_value=4420),
     fresh_map = game_launcher.start_new_game("zombie_cod5_factory")
 assert fresh_map is switch_game
 switch.assert_called_once_with(switch_game, "zombie_cod5_factory", None,
-                               legacy=False, enhanced=True, round_bridge=True)
+                               legacy=False, enhanced=True, round_bridge=True, map_state=True)
 assert ready.call_args.kwargs == {"during_opening": False, "allow_stale_checkpoint": True}
 
 print("Launcher readiness and bound save/load keys passed")
@@ -425,6 +425,17 @@ for map_name in ('zombie_cosmodrome', 'zombie_moon', 'zombie_paris'):
     with (patch.object(core, 'committed', side_effect=RuntimeError('No save yet')),
           patch.object(core, 'live_round', side_effect=lambda _: 1 if special.sample >= 10 else None),
           patch.object(game_launcher.time, 'sleep')):
-        game_launcher.wait_for_map_ready(special, map_name, during_opening=True)
+        game_launcher.wait_for_map_ready(special, map_name, during_opening=False)
     assert special.sample >= 11, 'Special intro was bypassed by opening shortcut'
 print('Ascension and Moon first-checkpoint readiness passed')
+
+# Restore readiness must not wait for Ascension's intro or Moon's teleport.
+for map_name in ('zombie_cosmodrome', 'zombie_moon', 'zombie_paris'):
+    special = FakeGame()
+    with (patch.object(core, 'committed', side_effect=RuntimeError('No save yet')),
+          patch.object(core, 'live_round', return_value=None),
+          patch.object(game_launcher.time, 'sleep')):
+        game_launcher.wait_for_map_ready(special, map_name, during_opening=True)
+    assert special.sample < 10
+assert 'set scr_zm_extra_perk_all 1' in (core.ROOT / 'checkpoint.cfg').read_text()
+print('Restore before first round and Mule Kick configuration passed')

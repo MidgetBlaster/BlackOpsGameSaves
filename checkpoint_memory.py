@@ -23,9 +23,15 @@ import sys
 import time
 import zipfile
 import memory_resolver
+import plutonium_support
 
 ROOT = (Path(sys.executable) if getattr(sys, "frozen", False) else Path(__file__)).resolve().parent
 GAME = ROOT.parent.parent
+CLIENT = "steam"
+if (ROOT / "client.json").is_file():
+    _client_config = json.loads((ROOT / "client.json").read_text(encoding="utf-8"))
+    CLIENT = _client_config.get("client", "steam")
+    GAME = Path(_client_config["game_directory"])
 ARCHIVE = ROOT / "checkpoint_saves"
 RECOVERY_FILE = ARCHIVE / "recovery" / "latest.bo1checkpoint"
 RECOVERY_INTERVAL = 60
@@ -88,7 +94,7 @@ MAP_SCENES = {
 # Legacy archives identify a whole-section shift. New profiles resolve each
 # symbol from code references and record the full table with the checkpoint.
 TESTED_DATA_BASE = 0x00B6C000
-PROFILE_FILE = ROOT / "memory_profile.json"
+PROFILE_FILE = ROOT / ("memory_profile_plutonium.json" if CLIENT == "plutonium" else "memory_profile.json")
 DATA_DELTA = 0
 PROFILE_ADDRESSES = (
     "COMMITTED_PTR", "WRITE_PTR", "COMMITTED_FLAG", "SAVE_QUEUE",
@@ -341,9 +347,12 @@ def probe_live_save_layout(game) -> bool:
     for name in PROFILE_ADDRESSES:
         game.read(globals()[name], 4)
     if (game.u32(LEVEL_FRAME_ADDR) == 0 or game.u32(LEVEL_TIME_ADDR) == 0 or
-            game.u32(MENU_ADDR) > 16 or game.u32(PAUSED_ADDR) > 8 or
-            game.read(ROUND_CHANGE_ADDR, 1)[0] > 1):
+            game.u32(MENU_ADDR) > 16 or game.u32(PAUSED_ADDR) > 8):
         raise RuntimeError("The live round or pause fields do not match the candidate profile")
+    # ROUND_CHANGE_ADDR is a HUD byte interpreted as zero/nonzero, not a
+    # serialized C++ bool. Plutonium writes 0xFF during round transitions.
+    # Its readability is checked above; rejecting values >1 disables captures
+    # precisely when an end-of-round checkpoint is due.
     for address, size in zip(BUFFERS[committed_address], BUFFER_SIZES):
         game.read(address, min(size, 16))
     return True
@@ -406,9 +415,9 @@ class GameProcess:
             path = ctypes.create_unicode_buffer(length.value)
             if not k.QueryFullProcessImageNameW(self.handle, 0, path, ctypes.byref(length)):
                 raise OSError(ctypes.get_last_error(), "Could not identify the game executable")
-            executable = Path(path.value)
-            if executable.name.lower() != "blackops.exe":
-                raise RuntimeError(f"Unsupported process: {executable.name}")
+            executable, self.client = plutonium_support.executable_for_process(Path(path.value), pid)
+            if self.client != CLIENT:
+                raise RuntimeError("Open the save manager installed for this game client.")
             self.profile = memory_profile(executable)
             if self.profile["status"] == "unavailable":
                 raise RuntimeError("No usable memory profile for this BlackOps.exe: " +
@@ -432,7 +441,10 @@ class GameProcess:
                 try:
                     self.layout_confirmed = probe_live_save_layout(self)
                 except (OSError, RuntimeError) as error:
-                    raise RuntimeError(f"{self.compatibility_error}\nLive layout check: {error}") from error
+                    # At the frontend the save buffers need not exist yet.
+                    # Recheck on committed()/write(); attachment alone never
+                    # grants permission to use the candidate's write addresses.
+                    self.compatibility_error += f"\nLive layout check: {error}"
                 if self.layout_confirmed:
                     self.record_live_verification()
         except BaseException:
@@ -601,8 +613,11 @@ def game_pid() -> int | None:
         entry.dwSize = ctypes.sizeof(entry)
         found = kernel.Process32FirstW(handle, ctypes.byref(entry))
         while found:
-            if entry.szExeFile.lower() == "blackops.exe":
+            if CLIENT == "steam" and entry.szExeFile.lower() == "blackops.exe":
                 return entry.th32ProcessID
+            if CLIENT == "plutonium" and entry.szExeFile.lower() == "plutonium-bootstrapper-win32.exe":
+                if plutonium_support.t5_process(entry.th32ProcessID):
+                    return entry.th32ProcessID
             found = kernel.Process32NextW(handle, ctypes.byref(entry))
         return None
     finally:
@@ -642,7 +657,7 @@ def validate_image(address: int, image: bytes, data_delta: int | None = None,
     if struct.unpack_from("<I", image, STATE_OFFSET)[0] != 3:
         raise RuntimeError("The game has no committed checkpoint yet")
     h = header_info(image)
-    if h["version"] not in (0x133, 0x134) or not h["filename"].startswith("save\\"):
+    if h["version"] not in (0x133, 0x134, 0x135) or not h["filename"].startswith("save\\"):
         raise RuntimeError("The committed checkpoint header is invalid")
     if not (0 < h["body_size"] <= BUFFER_SIZES[0] and
             0 <= h["secondary_size"] <= BUFFER_SIZES[1]):
@@ -674,6 +689,7 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
         target = ARCHIVE / f"{h['map']}-round-{round_number:03d}-{stamp}.bo1checkpoint"
     target.parent.mkdir(parents=True, exist_ok=True)
     metadata = {"format": 1, "executable_sha256": SUPPORTED_SHA256,
+                "source_client": getattr(game, "client", "steam"),
                 "source_executable_sha256": getattr(game, "executable_sha256", SUPPORTED_SHA256),
                 "source_data_delta": DATA_DELTA,
                 "save_address": address, "round": round_number,
@@ -693,6 +709,14 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
           options_script.read_bytes() == bridge_variant.read_bytes()):
         metadata["script_variant"] = "player_options_v2"
         metadata["power_on"] = any(POWER_MARKER in part for part in parts)
+    map_variant = ROOT / "scriptdata" / "checkpoint_variants" / "_checkpoint_coop_pause_v4.gsc"
+    if (options_script.is_file() and map_variant.is_file() and
+            options_script.read_bytes() == map_variant.read_bytes()):
+        metadata["script_variant"] = "map_state_v1"
+        metadata["power_on"] = any(POWER_MARKER in part for part in parts)
+        metadata["map_state_coverage"] = {
+            "server": "engine_script_vm",
+            "client_resync": ["ascension_power_vision"] if h["map"] == "zombie_cosmodrome" else []}
     pieces = {"save.bin": image, "state.bin": parts[0], "secondary.bin": parts[1]}
     metadata["sha256"] = {name: hashlib.sha256(data).hexdigest() for name, data in pieces.items()}
     temporary = target.with_suffix(".part")
@@ -742,7 +766,7 @@ def load_archive(path: Path) -> tuple[dict, dict[str, bytes]]:
             raise RuntimeError(f"Invalid checkpoint memory profile: {error}") from error
     h = validate_image(metadata["save_address"], pieces["save.bin"],
                        metadata.get("source_data_delta", 0), buffers=source_buffers)
-    if any(metadata.get(key) != h[key] for key in ("map", "map_checksum", "script_checksums", "save_id")):
+    if any(metadata.get(key) != h[key] for key in ("version", "map", "map_checksum", "script_checksums", "save_id")):
         raise RuntimeError("Checkpoint manifest does not match its save header")
     return metadata, pieces
 
@@ -771,6 +795,8 @@ def restore(game: GameProcess, path: Path, coop: bool = False):
     # suspended for the entire read/check/write transaction.
     with game.suspended() if coop else nullcontext():
         current_address, _, current = committed(game)
+        if current["version"] != metadata["version"]:
+            raise RuntimeError("The checkpoint save version differs from this game client. No game memory was changed.")
         if (current["map"], current["map_checksum"], current["script_checksums"]) != (
                 metadata["map"], metadata["map_checksum"], metadata["script_checksums"]):
             raise RuntimeError("The current map or scripts differ from the checkpoint. No game memory was changed.")

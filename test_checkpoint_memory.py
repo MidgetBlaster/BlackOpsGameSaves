@@ -193,6 +193,10 @@ game.executable_verified = False
 assert c.SaveQueueUnblocker().observe(game, 0) is False
 game.executable_verified = True
 assert c.probe_live_save_layout(game) is True
+for transition_byte in (0, 1, 255):
+    game.write(c.ROUND_CHANGE_ADDR, bytes([transition_byte]))
+    assert c.probe_live_save_layout(game) is True
+game.write(c.ROUND_CHANGE_ADDR, b'\0')
 game.write(c.PAUSED_ADDR, struct.pack('<I', 99))
 try:
     c.probe_live_save_layout(game)
@@ -311,3 +315,23 @@ assert observed.update(204, 0, 200, 1000, 15, 5) == 5
 command = base64.b64decode(c.elevated_command()).decode('utf-16le')
 assert "'--elevated'" in command and "checkpoint.py'" in command
 print('Synthetic snapshot, integrity, and restore passed')
+
+# Plutonium's observed save version uses the same envelope, but must never
+# be restored into a client expecting the Steam serialization version.
+with tempfile.TemporaryDirectory() as directory:
+    folder = Path(directory)
+    steam = FakeGame()
+    pluto = FakeGame()
+    pluto.write(c.SAVE_A + c.HEADER_OFFSET, struct.pack('<I', 309))
+    with patch.object(c, 'ARCHIVE', folder):
+        path = c.snapshot(pluto, 2)
+        assert c.load_archive(path)[0]['version'] == 309
+        before = steam.read(c.SAVE_A, c.SAVE_SIZE)
+        try:
+            c.restore(steam, path, coop=True)
+        except RuntimeError as error:
+            assert 'save version differs' in str(error)
+        else:
+            raise AssertionError('Cross-version restore was accepted')
+        assert steam.read(c.SAVE_A, c.SAVE_SIZE) == before
+print('Plutonium archive version and cross-version rejection passed')

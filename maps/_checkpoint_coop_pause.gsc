@@ -5,6 +5,8 @@
 init()
 {
 	SetDvar( "checkpoint_coop_pause", "0" );
+	SetDvar( "checkpoint_map_restore_token", "" );
+	SetDvar( "checkpoint_legacy_vision_token", "" );
 	SetDvar( "checkpoint_restore_token", "" );
 	level.checkpoint_coop_paused = false;
 	level thread watch_pause_request();
@@ -12,7 +14,7 @@ init()
 	level.checkpoint_strafe_speed_default = GetDvar( "player_strafeSpeedScale" );
 	level thread watch_player_options();
 	level thread watch_power_state();
-	level thread restore_power_state();
+	level thread watch_map_restore();
 }
 
 watch_power_state()
@@ -173,4 +175,38 @@ end_pause()
 	SetDvar( "ai_disableSpawn", level.checkpoint_old_spawn );
 	if( level.checkpoint_old_spawn_flag )
 		flag_set( "spawn_zombies" );
+}
+
+// The engine checkpoint owns server level flags, variables and script threads.
+// Dvars survive Continue; compare their clock with the restored server clock
+// to detect a manual load without replaying every map's progression events.
+watch_map_restore()
+{
+    level endon( "end_game" );
+    SetDvar( "checkpoint_map_clock", GetTime() );
+    token = GetDvar( "checkpoint_map_restore_token" );
+    remaining = 0;
+    for( ;; )
+    {
+        now = GetTime();
+        requested = GetDvar( "checkpoint_map_restore_token" );
+        if( requested != token || now + 250 < GetDvarInt( "checkpoint_map_clock" ) )
+        {
+            token = requested;
+            remaining = 20;
+        }
+        SetDvar( "checkpoint_map_clock", now );
+        if( remaining > 0 )
+        {
+            if( level.script == "zombie_cosmodrome" )
+            {
+                if( flag( "power_on" ) )
+                    ClientNotify( "GSR1" );
+                else
+                    ClientNotify( "GSR0" );
+            }
+            remaining--;
+        }
+        wait 0.1;
+    }
 }

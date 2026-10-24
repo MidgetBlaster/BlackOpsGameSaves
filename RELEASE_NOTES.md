@@ -1,4 +1,34 @@
-# Black Ops Game Saves v1.0.27
+# Black Ops Game Saves v1.0.28 — prerelease
+
+- Add Ascension power-vision reconciliation after Continue. New map-state
+  checkpoints use the restored server power flag; older player-options-v2
+  checkpoints use their recorded power metadata. Remove stale intro/power
+  vision layers without replaying the map's power-on gameplay events.
+- Preserve original server-script variants for existing checkpoints. New
+  checkpoints identify their state coverage: server script VM plus the
+  Ascension power-vision client adapter. The companion does not invent or
+  force a list of every map's quest/progression flags.
+- Known limits: this client-script repair has not yet been tested in game;
+  other maps' client-only effects, monkey-round visual state, and legacy
+  checkpoints without power metadata are not covered by the new adapter.
+  Full all-map state restoration is not verified. This is a prerelease.
+
+- Fix profile validation rejecting the nonzero HUD transition byte 255,
+  which could block captures at round end. Regression tests cover a manual
+  round-one save followed by autosaving under all three timing settings.
+
+- Restore readiness no longer waits for Ascension round one or Moon's teleport.
+  It uses the earliest initialized save-buffer signal; exact GSC-frame timing
+  is not guaranteed.
+- Enable scr_zm_extra_perk_all before map startup for Mule Kick placement.
+- Arm equipped-weapon requests before Continue and repeat after confirmation.
+- Install a separate experimental Plutonium mod/manager when Plutonium exists.
+  Use its signed-in launcher, load the mod, and execute checkpoint.cfg first.
+- Accept Plutonium save version 309 and reject cross-version restores. Live
+  Der Riese capture/archive/Continue/post-Continue save tests passed. Player
+  stats and equipped-weapon decoding on Plutonium remain unverified.
+
+## v1.0.27
 
 - Ascension's initial restore checkpoint waits for at least 15 seconds of
   level time and a live round signal instead of using the opening-screen shortcut.

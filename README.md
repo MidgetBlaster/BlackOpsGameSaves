@@ -138,3 +138,42 @@ git push -u origin main --follow-tags
 
 The tag push starts the Windows release workflow. The local release package is
 also available in `release/`.
+
+## Plutonium T5 (experimental)
+
+When Plutonium is already installed, the combined installer also places an
+independent Game Save mod and manager in
+`%LOCALAPPDATA%\Plutonium\storage\t5\mods\Game Save`.
+Its saves and executable memory profile are separate from the Steam copy.
+
+Start T5 through the signed-in Plutonium launcher, load Game Save from Mods,
+and execute `exec checkpoint.cfg` once. Open the manager in that Plutonium
+mod folder to use New Game / Continue with the running client. Automatic
+Plutonium launcher-to-map startup is not implemented yet. No LAN launch or
+fake online authentication is used. Live checkpoint verification is required;
+Plutonium version 309 was live-tested on Der Riese: checkpoint commit, disk archive, Continue, and another save after Continue all passed. Ascension/Moon startup, player-stat decoding and equipped-weapon correction remain unverified on Plutonium.
+
+Continue uses initialized engine save buffers as its earliest readiness signal;
+it cannot guarantee a particular frame relative to a GSC black-screen flag.
+`set scr_zm_extra_perk_all 1` enables Mule Kick placement before map scripts run.
+It does not establish an online login or recreate a machine absent from an old
+checkpoint's saved entities. Equipped weapons are restored by client slot and
+weapon name for saves using the player-options GSC variants; legacy checkpoints
+without that script cannot run the extra equipped-weapon correction.
+
+
+## Map state restoration (v1.0.28 prerelease)
+
+The archive retains the engine's server script VM, including saved level flags,
+map variables and threads. Client scripts do not use that same save path.
+The first explicit client adapter restores Ascension's power-dependent vision
+and removes its stale intro vision. New map-state saves read the restored
+server power flag; older player-options-v2 saves use recorded power metadata.
+Original server scripts remain available for their existing checksums.
+
+This is not complete all-map state support: client effects and map events need
+individual verification. The new GSC/CSC adapter needs an in-game test before
+this release can be considered stable. Manual Continue detection in the new
+script handles a rewind of the saved server clock. Manager Continue also sends
+an explicit restore request. Older saves without power metadata retain their
+original behavior rather than guessing progression state.
