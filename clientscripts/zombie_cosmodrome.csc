@@ -139,9 +139,6 @@ main()
 	level thread monkey_land_off();
 	
 	level thread cosmodrome_power_vision_set_swap();
-	level thread checkpoint_legacy_vision_restore();
-	level thread checkpoint_vision_restore( "GSR0", false );
-	level thread checkpoint_vision_restore( "GSR1", true );
 }
 
 cosmodrome_monkey_round_start_listener()
@@ -2623,51 +2620,4 @@ player_lander_fog( local_client_num, set, newEnt )
 		player thread fog_remove("lander");		
 	}
 
-}
-// Reconcile client-only vision after the server VM has loaded its checkpoint.
-// Do not replay ZPO: that event also launches world effects and lander logic.
-checkpoint_vision_restore( event_name, powered )
-{
-    for( ;; )
-    {
-        level waittill( event_name );
-        checkpoint_apply_saved_vision( powered );
-    }
-}
-
-checkpoint_apply_saved_vision( powered )
-{
-        level._power_on = powered;
-        players = GetLocalPlayers();
-        for( i = 0; i < players.size; i++ )
-        {
-            players[i] clientscripts\_zombiemode::zombie_vision_set_remove( level._visionset_map_begin, 0, i );
-            players[i] clientscripts\_zombiemode::zombie_vision_set_remove( level._visionset_map_sudden_power, 0, i );
-            players[i] clientscripts\_zombiemode::zombie_vision_set_remove( level._visionset_map_poweron, 0, i );
-            players[i] clientscripts\_zombiemode::zombie_vision_set_remove( level._visionset_map_nopower, 0, i );
-            players[i] cosmodrome_vision_set( i );
-        }
-}
-
-// Existing server checkpoints keep their original GSC checksum. The manager
-// can still repair local vision using their recorded power metadata.
-checkpoint_legacy_vision_restore()
-{
-    token = "";
-    remaining = 0;
-    for( ;; )
-    {
-        requested = GetDvar( "checkpoint_legacy_vision_token" );
-        if( requested != "" && requested != token )
-        {
-            token = requested;
-            remaining = 20;
-        }
-        if( remaining > 0 )
-        {
-            checkpoint_apply_saved_vision( GetDvarInt( "checkpoint_restore_power_on" ) != 0 );
-            remaining--;
-        }
-        wait 0.1;
-    }
 }

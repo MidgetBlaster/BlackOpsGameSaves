@@ -1541,7 +1541,7 @@ class CheckpointApp(tk.Tk):
                         self.events.put(("watch_error", _round))
                 core.watch(baseline_round, self.watch_stop, callback, self.save_lock,
                            skip_initial_round=skip_round, enable_recovery=False,
-                           save_timing=save_timing)
+                           save_timing=save_timing, map_hint=getattr(self, "watch_map_hint", None))
             except Exception as error:
                 self.events.put(("watch_error", str(error)))
             finally:
@@ -1658,6 +1658,7 @@ class CheckpointApp(tk.Tk):
                     self.current_session_legacy = legacy
                     self.current_session_options = options
                     self.pending_coop = None
+                    self.watch_map_hint = None
                     self.started_save_name = name
                     self.skip_initial_round = round_number
                     self.start_cancel = None
@@ -1674,6 +1675,7 @@ class CheckpointApp(tk.Tk):
                     self._start_watch()
                 elif kind == "new_game_started":
                     map_name = event[1]
+                    self.watch_map_hint = map_name
                     self.started_save_name = None
                     self.skip_initial_round = None
                     self.current_session_legacy = False

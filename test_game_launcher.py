@@ -201,6 +201,7 @@ assert [call.kwargs["timeout"] for call in wait_for_save.call_args_list] == [3, 
 wait_for_ready.assert_not_called()
 
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory", "round": 4}, {})),
+      patch.object(game_launcher, "wait_for_map_ready"),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore") as restore_mock,
       patch.object(game_launcher, "wait_for_focus"),
@@ -214,6 +215,7 @@ with (patch.object(core, "load_archive", return_value=({
           "map": "zombie_cod5_factory", "round": 4,
           "script_variant": "player_options_v1"}, {})),
       patch.object(game_launcher, "weapon_restore_config", return_value=True),
+      patch.object(game_launcher, "wait_for_map_ready"),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore"),
       patch.object(game_launcher, "wait_for_focus"),
@@ -227,6 +229,7 @@ with (patch.object(core, "load_archive", return_value=({
           "script_variant": "player_options_v2"}, {})),
       patch.object(game_launcher, "weapon_restore_config", return_value=False),
       patch.object(game_launcher, "power_restore_config") as power_config,
+      patch.object(game_launcher, "wait_for_map_ready"),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore"),
       patch.object(game_launcher, "wait_for_focus"),
@@ -239,6 +242,7 @@ assert fresh_game.commands[:3] == [
     (0x71, "F2 restore power state during Continue")]
 
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory", "round": 4}, {})),
+      patch.object(game_launcher, "wait_for_map_ready"),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore"),
       patch.object(game_launcher, "wait_for_focus"),
@@ -248,6 +252,7 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
 assert fresh_game.commands[-2:] == ["F12", (0x72, "F3 local movement fix")]
 
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory", "round": 4}, {})),
+      patch.object(game_launcher, "wait_for_map_ready"),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore"),
       patch.object(game_launcher, "wait_for_focus"),
@@ -259,6 +264,7 @@ loaded.assert_called_once_with(fresh_game, 4, None, timeout=8, before_clock=(100
 ascension_game = FreshGame()
 with (patch.object(core, "load_archive", return_value=({
           "map": "zombie_cosmodrome", "round": 7}, {})),
+      patch.object(game_launcher, "wait_for_map_ready"),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore"),
       patch.object(core, "live_round", return_value=1),
@@ -269,7 +275,8 @@ with (patch.object(core, "load_archive", return_value=({
         ascension_game, core.ARCHIVE / "ascension.bo1checkpoint", "Solo")
 assert ascension_game.commands == ["F12", "F12"]
 assert "resume_warning" not in restored
-map_ready.assert_called_once_with(ascension_game, "zombie_cosmodrome", None,
+assert map_ready.call_count == 2
+map_ready.assert_called_with(ascension_game, "zombie_cosmodrome", None,
                                   during_opening=True, allow_stale_checkpoint=True)
 assert loaded.call_args_list[1].kwargs["timeout"] == 20
 
@@ -277,6 +284,7 @@ assert loaded.call_args_list[1].kwargs["timeout"] == 20
 failed_game = FreshGame()
 with (patch.object(core, "load_archive", return_value=({
           "map": "zombie_cosmodrome", "round": 7}, {})),
+      patch.object(game_launcher, "wait_for_map_ready"),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore"),
       patch.object(core, "live_round", return_value=1),
@@ -293,6 +301,7 @@ with (patch.object(core, "load_archive", return_value=({
 assert failed_game.commands == ["F12", "F12"]
 
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cosmodrome", "round": 7}, {})),
+      patch.object(game_launcher, "wait_for_map_ready"),
       patch.object(game_launcher, "make_fresh_checkpoint"),
       patch.object(core, "restore"),
       patch.object(core, "live_round", return_value=None),
@@ -440,15 +449,18 @@ for map_name in ('zombie_cosmodrome', 'zombie_moon', 'zombie_paris'):
 assert 'set scr_zm_extra_perk_all 1' in (core.ROOT / 'checkpoint.cfg').read_text()
 print('Restore before first round and Mule Kick configuration passed')
 
-# Ascension must never issue devsave during its transient lander opening.
+# Old Ascension saves retain their original CSC and wait for the tested intro boundary.
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cosmodrome", "round": 4}, {})),
+      patch.object(game_launcher, "wait_for_map_ready") as ready,
       patch.object(game_launcher, "make_fresh_checkpoint") as bootstrap,
       patch.object(core, "restore") as restore_mock,
       patch.object(game_launcher, "wait_for_focus"),
       patch.object(game_launcher, "wait_for_loaded_round", return_value=True)):
     fresh_game.commands.clear()
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "ascension.bo1checkpoint", "Solo")
-bootstrap.assert_not_called()
-assert restore_mock.call_args.kwargs == {"coop": True, "opening": True}
+ready.assert_called_once_with(fresh_game,"zombie_cosmodrome",None,
+                              during_opening=False,allow_stale_checkpoint=True)
+bootstrap.assert_called_once()
+assert restore_mock.call_args.kwargs == {"coop": True}
 assert fresh_game.commands == ["F12"]
-print("Ascension Continue skips the intro checkpoint")
+print("Ascension uses the verified intro boundary and validates a current checkpoint")

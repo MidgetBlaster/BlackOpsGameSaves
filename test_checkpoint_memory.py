@@ -336,40 +336,17 @@ with tempfile.TemporaryDirectory() as directory:
         assert steam.read(c.SAVE_A, c.SAVE_SIZE) == before
 print('Plutonium archive version and cross-version rejection passed')
 
-# Startup injection uses initialized engine buffers, never a fresh intro save.
-with tempfile.TemporaryDirectory() as directory, patch.object(c, "ARCHIVE", Path(directory)):
-    source = FakeGame()
-    path = c.snapshot(source, 5)
-    def empty_game():
-        live = FakeGame()
-        live.executable_sha256 = c.SUPPORTED_SHA256
-        for address in c.BUFFERS:
-            image = bytearray(c.SAVE_SIZE)
-            struct.pack_into("<I", image, 0, c.BUFFERS[address][0])
-            struct.pack_into("<I", image, c.MEMFILE_SIZE, c.BUFFERS[address][1])
-            live.write(address, image)
-        return live
-    live = empty_game()
-    with patch.object(c, "snapshot", side_effect=AssertionError("No startup archive")):
-        c.restore(live, path, coop=True, opening=True)
-    assert c.committed(live)[2]["save_id"] == 1
-    assert not list(Path(directory).glob("*.bo1backup"))
-    for problem in ("hash", "busy", "pointer", "queued"):
-        live = empty_game()
-        if problem == "hash":
-            live.executable_sha256 = "different"
-        elif problem == "busy":
-            live.write(c.SAVE_B + c.STATE_OFFSET, struct.pack("<I", 1))
-        elif problem == "pointer":
-            live.write(c.SAVE_B, struct.pack("<I", 0))
-        else:
-            live.write(c.SAVE_QUEUE_COUNT, struct.pack("<I", 1))
-        before = {key: bytes(value) for key, value in live.regions.items()}
-        try:
-            c.restore(live, path, coop=True, opening=True)
-        except RuntimeError:
-            pass
-        else:
-            raise AssertionError("Invalid opening accepted: " + problem)
-        assert before == {key: bytes(value) for key, value in live.regions.items()}
-print("Opening restore and rejection without memory changes passed")
+# Client VM compatibility is independent of the server-script checksum.
+import hashlib
+original = (c.ROOT / "scriptdata/checkpoint_variants/zombie_cosmodrome_v1.csc").read_bytes()
+c.validate_client_script({"map": "zombie_cosmodrome"})  # released legacy saves
+c.validate_client_script({"map": "zombie_cosmodrome",
+                          "ascension_client_script_sha256": hashlib.sha256(original).hexdigest()})
+try:
+    c.validate_client_script({"map": "zombie_cosmodrome",
+                              "ascension_client_script_sha256": "different"})
+except RuntimeError as error:
+    assert "different client script" in str(error)
+else:
+    raise AssertionError("Mismatched client VM accepted")
+print("Ascension client-script compatibility checks passed")

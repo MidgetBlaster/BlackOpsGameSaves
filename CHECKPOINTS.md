@@ -269,3 +269,25 @@ it replaces the checkpoint. After it resumes, run `loadgame_continue` on the
 host. Remote-player reconnection and their restored state need an in-game test.
 
 The old `.svg` archiver was invalid for Zombies and has been removed.
+
+
+### Ascension checkpoint compatibility
+
+Client-script compatibility matters in addition to the server checksum. Live
+Steam tests showed older Ascension archives crashing with the modified CSC and
+loading successfully with the original CSC. The release preserves the original
+Ascension client script in both the loose file and IWD. New captures record its
+hash; incompatible recorded hashes are rejected before launching a restore.
+The verified legacy restore waits until the lander intro finishes, creates a
+current checkpoint for validation, and then restores. Exact black-screen-frame
+loading is not claimed.
+
+### Moon's first autosave
+
+No Man's Land is tracked internally as round zero. Manual F11 saves and native
+`loadgame_continue` remain available there. The first observed round-one start
+queues one initial autosave regardless of the configured later-round timing.
+Subsequent autosaves use the selected timing. Manual captures never acknowledge
+or cancel the automatic queue. Repeated pre-round manual Continue restores the
+round-zero baseline; loading an existing round-one-or-later save does not itself
+create a new startup autosave.

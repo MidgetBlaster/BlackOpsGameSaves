@@ -40,7 +40,8 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
              missing_round=False, magic_transition=False, start_round=None,
              manual_continue=False, save_timing="End of Rounds",
              initial_round=4, transition_byte=1, advance_after_manual=False,
-             manual_failure=False, auto_failures=0):
+             manual_failure=False, auto_failures=0, scene=204,
+             resume_archive_round=2, reload_ticks=(2,), first_round_tick=None, restart=False):
     game = FakeGame()
     game.round = initial_round
     clock = [0.0]
@@ -58,16 +59,19 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
             clock[0] += 3
             game.frame += 60
             game.level_time += 3000
-            if manual_continue and self.ticks == 2:
+            if manual_continue and self.ticks in reload_ticks:
                 game.frame = 10
                 game.level_time = 500
                 game.round = 0
-                game.save_id = 2
+                if not restart:
+                    game.save_id = 2
+                else:
+                    game.round = 1 if scene != 76 else 0
             if manual_continue and self.ticks == 5:
                 game.round_change = True
             if manual_continue and self.ticks == 6:
                 game.round_change = False
-            if player_f11 and self.ticks == manual_tick:
+            if player_f11 and self.ticks in (manual_tick if isinstance(manual_tick, tuple) else (manual_tick,)):
                 game.save_id += 1
             if advance_round and (not player_f11 or advance_after_manual) and self.ticks == 3:
                 game.round = initial_round + 1
@@ -75,6 +79,8 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
                 game.round = 6
             if round_end_tick == self.ticks:
                 game.round_change = transition_byte
+            if self.ticks == first_round_tick:
+                game.round = 1
             if magic_transition and self.ticks == 2:
                 game.magic = 2000
             if magic_transition and self.ticks == 3:
@@ -98,9 +104,9 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
               patch.object(core, "GameProcess", return_value=game),
               patch.object(core, "live_round", side_effect=lambda _game:
                            None if missing_round or game.round <= 0 else game.round),
-              patch.object(core, "effective_scene", return_value=(204, None)),
+              patch.object(core, "effective_scene", return_value=(scene, None)),
               patch.object(core, "archived_round_for_header",
-                           side_effect=lambda *_: 2 if manual_continue else None),
+                           side_effect=lambda *_: resume_archive_round if manual_continue else None),
               patch.object(core, "committed", side_effect=lambda _game: (
                   core.SAVE_A, b"", {"map": "zombie_cod5_factory", "save_id": game.save_id})),
               patch.object(core, "snapshot", side_effect=manual_snapshot),
@@ -322,3 +328,40 @@ for timing in core.SAVE_TIMINGS:
                       save_timing=timing, auto_failures=1)
     assert captures(events) == [("manual", 6), ("saved", expected)], (timing, events)
 print("Pending autosaves survive manual captures, manual errors and delayed commits")
+
+# Moon has a playable round-zero opening. F11 never consumes its round-one event.
+for timing in core.SAVE_TIMINGS:
+    events = exercise(True, scene=76, initial_round=0, manual_tick=1,
+                      advance_after_manual=True, save_timing=timing)
+    assert captures(events) == [("manual", 0), ("saved", 1)], (timing, events)
+    events = exercise(True, scene=76, initial_round=0, manual_tick=4,
+                      advance_after_manual=True, save_timing=timing, auto_failures=1)
+    assert captures(events) == [("manual", 1), ("saved", 1)], (timing, events)
+    events = exercise(True, scene=76, initial_round=0, advance_round=False,
+                      manual_tick=4, save_timing=timing)
+    assert captures(events) == [("manual", 0)], (timing, events)
+    events = exercise(False, scene=76, initial_round=1, skip_initial_round=1,
+                      advance_round=False, save_timing=timing)
+    assert captures(events) == [], (timing, events)
+print("Moon round-zero manual saves preserve the independent round-one autosave")
+
+for timing in core.SAVE_TIMINGS:
+    events = exercise(True, scene=76, initial_round=0, advance_round=False,
+                      manual_tick=(1,3,5), manual_continue=True,
+                      resume_archive_round=0, reload_ticks=(2,4),
+                      first_round_tick=6, save_timing=timing)
+    assert captures(events) == [("manual",0),("manual",0),("manual",0),("saved",1)], (timing, events)
+print("Repeated Moon pre-round Continue/F11 cycles still trigger exactly one round-one autosave")
+
+# Restart keeps a stale committed checkpoint from round nine in memory.
+# Both commands must label subsequent manual/automatic saves from the new round.
+for command in ("map_restart", "fast_restart"):
+    events = exercise(True, initial_round=9, start_round=9,
+                      manual_continue=True, restart=True, manual_tick=3,
+                      advance_round=False, resume_archive_round=9)
+    assert captures(events) == [("manual", 1), ("saved", 1)], (command, captures(events))
+    events = exercise(True, initial_round=9, start_round=9, scene=76,
+                      manual_continue=True, restart=True, manual_tick=3,
+                      advance_round=False, resume_archive_round=9, first_round_tick=4)
+    assert captures(events)[0:2] == [("manual", 0), ("saved", 1)], captures(events)
+print("Restart discards stale archive rounds and rearms autosaving, including Moon")

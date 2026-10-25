@@ -41,6 +41,11 @@ def payload_zip() -> Path:
         iwd = ROOT / "Game Save.iwd"
         if not iwd.is_file():
             iwd = ROOT / "devcommands.iwd"
+        with zipfile.ZipFile(iwd) as packaged:
+            for name in packaged.namelist():
+                if name.endswith(".csc") and (ROOT / name).is_file():
+                    if packaged.read(name) != (ROOT / name).read_bytes():
+                        raise RuntimeError(f"Packaged client script is stale: {name}")
         archive.write(iwd, "Game Save.iwd")
     return package
 

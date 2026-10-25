@@ -67,12 +67,15 @@ def prepare_script_variant(*, legacy: bool, enhanced: bool = False,
 
     client_script = core.ROOT / "clientscripts" / "zombie_cosmodrome.csc"
     original_client = SCRIPT_VARIANTS / "zombie_cosmodrome_v1.csc"
-    fixed_client = SCRIPT_VARIANTS / "zombie_cosmodrome_v2.csc"
-    if original_client.is_file() and fixed_client.is_file():
-        old_client, new_client = original_client.read_bytes(), fixed_client.read_bytes()
-        if client_script.read_bytes() not in (old_client, new_client):
+    if original_client.is_file():
+        known = [path.read_bytes() for path in (
+            original_client, SCRIPT_VARIANTS / "zombie_cosmodrome_v2.csc",
+            SCRIPT_VARIANTS / "zombie_cosmodrome_v3.csc") if path.is_file()]
+        if client_script.read_bytes() not in known:
             raise RuntimeError("Ascension's client script was modified outside the manager")
-        desired = new_client  # Client VM is not part of the server save checksum.
+        desired = original_client.read_bytes()
+        # Native and same-session round trips worked with the modified CSC,
+        # but an older archive only loaded after restoring this original CSC.
         if client_script.read_bytes() != desired:
             temporary = client_script.with_suffix('.csc.tmp')
             temporary.write_bytes(desired)
@@ -370,18 +373,18 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
                 metadata["weapon_restore_warning"] = "The saved equipped weapon could not be identified."
         except (OSError, RuntimeError, ValueError, KeyError) as error:
             metadata["weapon_restore_warning"] = f"Could not read the saved equipped weapon: {error}"
-    opening_restore = metadata["map"] == "zombie_cosmodrome"
-    if not opening_restore:
-        make_fresh_checkpoint(game, metadata["map"], cancel)
+    if metadata["map"] == "zombie_cosmodrome":
+        # The original CSC has no companion handshake. Preserve its saved VM
+        # and use the live-tested post-lander boundary, not an arbitrary early timer.
+        wait_for_map_ready(game, metadata["map"], cancel,
+                           during_opening=False, allow_stale_checkpoint=True)
+    make_fresh_checkpoint(game, metadata["map"], cancel)
     if mode not in ("Solo", "Co-op"):
         raise ValueError("Choose Solo or Co-op for this save before starting it")
     _check_cancel(cancel)
     # Suspend the live server for either mode. The solo pause menu intercepts
     # console and bound keys, preventing the final continue command.
-    if opening_restore:
-        core.restore(game, save_path, coop=True, opening=True)
-    else:
-        core.restore(game, save_path, coop=True)
+    core.restore(game, save_path, coop=True)
     wait_for_focus(game, cancel)
     before_continue = (game.u32(core.LEVEL_FRAME_ADDR), game.u32(core.LEVEL_TIME_ADDR))
     if power_config:
@@ -533,6 +536,7 @@ def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
 def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | None = None,
                         report=None) -> tuple[core.GameProcess, dict]:
     metadata, _ = core.load_archive(save_path)
+    core.validate_client_script(metadata)
     use_legacy = legacy_scripts(metadata)
     use_enhanced = enhanced_scripts(metadata)
     use_round_bridge = round_bridge_scripts(metadata)
@@ -605,14 +609,15 @@ def start_new_game(map_name: str, cancel: threading.Event | None = None,
         try:
             switch_running_map(game, map_name, cancel, legacy=False, enhanced=True,
                                round_bridge=True, map_state=True)
-            wait_for_map_ready(game, map_name, cancel, during_opening=False,
+            wait_for_map_ready(game, map_name, cancel, during_opening=core.MAP_SCENES.get(map_name) == 76,
                                allow_stale_checkpoint=True)
             return game
         except GameProcessReplaced:
             game.close()
             replacement = wait_for_replacement_game(running_pid, cancel)
             try:
-                wait_for_map_ready(replacement, map_name, cancel)
+                wait_for_map_ready(replacement, map_name, cancel,
+                                   during_opening=core.MAP_SCENES.get(map_name) == 76)
                 return replacement
             except BaseException:
                 replacement.close()
@@ -630,7 +635,8 @@ def start_new_game(map_name: str, cancel: threading.Event | None = None,
     while True:
         try:
             wait_for_map_ready(game, map_name, cancel,
-                               timeout=max(0, deadline - time.monotonic()))
+                               timeout=max(0, deadline - time.monotonic()),
+                               during_opening=core.MAP_SCENES.get(map_name) == 76)
             return game
         except GameProcessReplaced:
             game.close()

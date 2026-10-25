@@ -1,3 +1,28 @@
+# Black Ops Game Saves v1.0.30 - prerelease
+
+- Reset round labels and automatic progression after map_restart/fast_restart instead of reusing stale checkpoint rounds.
+
+- Moon queues its first automatic checkpoint when round one begins. No Man's
+  Land is tracked internally as round zero; manual F11 and Continue remain
+  independent of the automatic queue before and between rounds.
+- Preserve zero when recovering the round from a manually loaded pre-round
+  checkpoint. Repeated pre-round saves/Continues do not suppress the initial
+  round-one autosave. Later autosaves follow the selected timing.
+- Restore Ascension's original client script in both loose files and the IWD.
+  Live Steam tests confirmed an older round-nine archive failed with the modified
+  CSC and loaded with the original. Server-checksum equality alone was insufficient.
+- New Ascension archives record the client-script hash. Reject known incompatible
+  client scripts rather than attempting a mismatched restore. Existing saves remain.
+- Remove experimental startup injection without a current checkpoint. Ascension's
+  verified legacy path waits for the lander intro, then validates a fresh checkpoint
+  before Continue. Exact initial-black-screen timing is not implemented.
+- The packager rejects stale client scripts in the IWD. Automated tests cover
+  manual-save/autosave independence, pending retries, repeated Moon pre-round
+  Continue/F11 cycles, and client-script compatibility.
+- Live Steam Moon Continue restored the saved round before the first teleport.
+  Moon round-one autosave behavior has regression tests but still needs a live
+  first-teleport test. Co-op and Plutonium changes remain unverified in this build.
+
 # Black Ops Game Saves v1.0.29 - prerelease
 
 - Give automatic saves a separate pending-request queue. Manual F11 captures

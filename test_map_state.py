@@ -22,7 +22,7 @@ with TemporaryDirectory() as temp:
           patch.object(launch,'OPTIONS_SCRIPT',options),patch.object(launch,'SCRIPT_VARIANTS',variants)):
         launch.prepare_script_variant(legacy=False,enhanced=True,round_bridge=True,map_state=True)
         assert options.read_bytes()==(variants/'_checkpoint_coop_pause_v4.gsc').read_bytes()
-        assert client.read_bytes()==(variants/'zombie_cosmodrome_v2.csc').read_bytes()
+        assert client.read_bytes()==(variants/'zombie_cosmodrome_v1.csc').read_bytes()
         launch.power_restore_config(False,map_state=True)
         config=(root/'checkpoint_power.cfg').read_text()
         assert 'checkpoint_map_restore_token' in config
