@@ -810,8 +810,8 @@ def validate_client_script(metadata):
                            "It cannot be loaded with the original script; the save was kept.")
 
 
-def restore(game: GameProcess, path: Path, coop: bool = False):
-    metadata, pieces = load_archive(path)
+def restore(game: GameProcess, path: Path, coop: bool = False, *, prepared_archive=None):
+    metadata, pieces = prepared_archive if prepared_archive is not None else load_archive(path)
     validate_client_script(metadata)
     source_profile = metadata.get("source_memory_profile")
     if source_profile is None:

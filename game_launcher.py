@@ -357,12 +357,8 @@ def make_fresh_checkpoint(game: core.GameProcess, map_name: str,
         raise RuntimeError(f"Black Ops loaded {fresh['map']}, but this save needs {map_name}")
 
 
-def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
-                         cancel: threading.Event | None = None,
-                         *, speed_fix_enabled: bool = False):
-    metadata, _ = core.load_archive(save_path)
-    power_config = round_bridge_scripts(metadata)
-    if power_config:
+def prepare_restore_options(save_path, metadata):
+    if round_bridge_scripts(metadata):
         power_restore_config(bool(metadata.get("power_on")),
                              map_state=metadata.get("script_variant") == "map_state_v1")
     weapon_config = None
@@ -373,6 +369,21 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
                 metadata["weapon_restore_warning"] = "The saved equipped weapon could not be identified."
         except (OSError, RuntimeError, ValueError, KeyError) as error:
             metadata["weapon_restore_warning"] = f"Could not read the saved equipped weapon: {error}"
+    return weapon_config
+
+
+def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
+                         cancel: threading.Event | None = None,
+                         *, speed_fix_enabled: bool = False):
+    prepared = getattr(game, "_ascension_restore", None)
+    if prepared is not None and prepared[0] == Path(save_path).resolve():
+        metadata, pieces, weapon_config = prepared[1:]
+        game._ascension_restore = None  # consume only this selected launch
+    else:
+        metadata, pieces = core.load_archive(save_path)
+        weapon_config = prepare_restore_options(save_path, metadata)
+
+    power_config = round_bridge_scripts(metadata)
     if metadata["map"] == "zombie_cosmodrome":
         # Saved games resume at the initialized-map boundary, as verified by
         # the early Continue test. Do not wait for the lander or round one.
@@ -385,7 +396,10 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
     _check_cancel(cancel)
     # Suspend the live server for either mode. The solo pause menu intercepts
     # console and bound keys, preventing the final continue command.
-    core.restore(game, save_path, coop=True)
+    if metadata["map"] == "zombie_cosmodrome":
+        core.restore(game, save_path, coop=True, prepared_archive=(metadata, pieces))
+    else:
+        core.restore(game, save_path, coop=True)
     wait_for_focus(game, cancel)
     before_continue = (game.u32(core.LEVEL_FRAME_ADDR), game.u32(core.LEVEL_TIME_ADDR))
     if power_config:
@@ -542,8 +556,16 @@ def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
 
 def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | None = None,
                         report=None) -> tuple[core.GameProcess, dict]:
-    metadata, _ = core.load_archive(save_path)
+    metadata, pieces = core.load_archive(save_path)
     core.validate_client_script(metadata)
+    prepared = None
+    if metadata["map"] == "zombie_cosmodrome":
+        prepared = (Path(save_path).resolve(), metadata, pieces,
+                    prepare_restore_options(save_path, metadata))
+    def ready_result(game):
+        if prepared is not None:
+            game._ascension_restore = prepared
+        return game, metadata
     use_legacy = legacy_scripts(metadata)
     use_enhanced = enhanced_scripts(metadata)
     use_round_bridge = round_bridge_scripts(metadata)
@@ -560,7 +582,7 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
             # loadgame_continue expects and can leave a live session broken.
             switch_running_map(game, metadata["map"], cancel, legacy=use_legacy,
                                enhanced=use_enhanced, round_bridge=use_round_bridge, map_state=use_map_state)
-            return game, metadata
+            return ready_result(game)
         except GameProcessReplaced:
             game.close()
             if report:
@@ -569,7 +591,7 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
             try:
                 wait_for_map_ready(replacement, metadata["map"], cancel,
                                    during_opening=True)
-                return replacement, metadata
+                return ready_result(replacement)
             except BaseException:
                 replacement.close()
                 raise
@@ -591,7 +613,7 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
             wait_for_map_ready(game, metadata["map"], cancel,
                                timeout=max(0, deadline - time.monotonic()),
                                during_opening=True)
-            return game, metadata
+            return ready_result(game)
         except GameProcessReplaced:
             game.close()
             if report:

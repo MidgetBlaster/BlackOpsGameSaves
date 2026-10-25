@@ -1,3 +1,11 @@
+# Black Ops Game Saves v1.0.33
+
+- Prepare Ascension archives and weapon/power configuration before starting the map. Reuse the verified archive during restore, removing repeated file reads and decompression from the opening.
+- Continue still runs at early map readiness after the fresh checkpoint commits. Current-map, script, version, memory-profile and write verification remain in place.
+- New games and other maps retain their previous behavior. Co-op still waits for the players to rejoin.
+- Tests verify that preloaded Ascension restores perform no archive or option preparation during the intro. This removes preparation latency; it does not guarantee an exact frame, a fixed 1.5-second improvement, or a completely hidden intro.
+- Regular release; combined Steam/Plutonium installer is the sole attached asset.
+
 # Black Ops Game Saves v1.0.32
 
 - Start saved Ascension games at the initialized-map boundary instead of waiting for the lander intro and round one. Continue is sent as soon as a fresh checkpoint has committed and the selected archive has been validated and restored.

@@ -208,7 +208,8 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
       patch.object(game_launcher, "wait_for_loaded_round", return_value=True)):
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
 assert fresh_game.commands[-1] == "F12"
-assert restore_mock.call_args.kwargs == {"coop": True}
+assert restore_mock.call_args.kwargs["coop"] is True
+assert "prepared_archive" not in restore_mock.call_args.kwargs
 
 fresh_game.press_game_key = lambda key, description: fresh_game.commands.append((key, description))
 with (patch.object(core, "load_archive", return_value=({
@@ -461,7 +462,8 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cosmodrom
 ready.assert_called_once_with(fresh_game,"zombie_cosmodrome",None,
                               during_opening=True,allow_stale_checkpoint=True)
 bootstrap.assert_called_once()
-assert restore_mock.call_args.kwargs == {"coop": True}
+assert restore_mock.call_args.kwargs["coop"] is True
+assert restore_mock.call_args.kwargs["prepared_archive"][0]["map"] == "zombie_cosmodrome"
 assert fresh_game.commands == ["F12"]
 print("Ascension resumes at early map readiness and validates a current checkpoint")
 
@@ -480,3 +482,31 @@ for map_name in ("zombie_cosmodrome", "zombie_moon"):
         game_launcher.restore_and_continue(fresh_game,core.ARCHIVE/"vision.bo1checkpoint","Solo")
     assert order == (["loaded","vision"] if map_name=="zombie_cosmodrome" else ["loaded"])
 print("Ascension-only vision restoration occurs after confirmed Continue")
+
+# Preparation must not be repeated while Ascension's intro is running.
+path=core.ARCHIVE/"preloaded.bo1checkpoint"
+metadata={"map":"zombie_cosmodrome","round":4}
+pieces={"save.bin":b"validated archive"}
+fresh_game._ascension_restore=(path.resolve(),metadata,pieces,False)
+with (patch.object(core,"load_archive",side_effect=AssertionError("Late archive read")),
+      patch.object(game_launcher,"prepare_restore_options",side_effect=AssertionError("Late option preparation")),
+      patch.object(game_launcher,"wait_for_map_ready"),
+      patch.object(game_launcher,"make_fresh_checkpoint"),
+      patch.object(core,"restore") as restored,
+      patch.object(game_launcher,"wait_for_focus"),
+      patch.object(game_launcher,"wait_for_loaded_round",return_value=True)):
+    game_launcher.restore_and_continue(fresh_game,path,"Solo")
+assert restored.call_args.kwargs["prepared_archive"] == (metadata,pieces)
+assert fresh_game._ascension_restore is None
+print("Ascension consumes its preloaded archive without disk preparation during the intro")
+
+order=[]
+with (patch.object(core,"load_archive",return_value=(metadata,pieces)),
+      patch.object(core,"validate_client_script"),
+      patch.object(core,"game_pid",return_value=1),
+      patch.object(core,"GameProcess",return_value=fresh_game),
+      patch.object(game_launcher,"prepare_restore_options",side_effect=lambda *a:order.append("prepare") or False),
+      patch.object(game_launcher,"switch_running_map",side_effect=lambda *a,**k:order.append("map"))):
+    game_launcher.start_selected_game(path,"Solo")
+assert order == ["prepare","map"]
+print("Ascension preparation precedes the map switch")
