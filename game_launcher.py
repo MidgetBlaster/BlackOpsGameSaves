@@ -370,13 +370,18 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
                 metadata["weapon_restore_warning"] = "The saved equipped weapon could not be identified."
         except (OSError, RuntimeError, ValueError, KeyError) as error:
             metadata["weapon_restore_warning"] = f"Could not read the saved equipped weapon: {error}"
-    make_fresh_checkpoint(game, metadata["map"], cancel)
+    opening_restore = metadata["map"] == "zombie_cosmodrome"
+    if not opening_restore:
+        make_fresh_checkpoint(game, metadata["map"], cancel)
     if mode not in ("Solo", "Co-op"):
         raise ValueError("Choose Solo or Co-op for this save before starting it")
     _check_cancel(cancel)
     # Suspend the live server for either mode. The solo pause menu intercepts
     # console and bound keys, preventing the final continue command.
-    core.restore(game, save_path, coop=True)
+    if opening_restore:
+        core.restore(game, save_path, coop=True, opening=True)
+    else:
+        core.restore(game, save_path, coop=True)
     wait_for_focus(game, cancel)
     before_continue = (game.u32(core.LEVEL_FRAME_ADDR), game.u32(core.LEVEL_TIME_ADDR))
     if power_config:

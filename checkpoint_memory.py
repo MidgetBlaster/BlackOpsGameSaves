@@ -778,7 +778,7 @@ def latest_archive() -> Path:
     return entries[0]
 
 
-def restore(game: GameProcess, path: Path, coop: bool = False):
+def restore(game: GameProcess, path: Path, coop: bool = False, *, opening: bool = False):
     metadata, pieces = load_archive(path)
     source_profile = metadata.get("source_memory_profile")
     if source_profile is None:
@@ -794,12 +794,38 @@ def restore(game: GameProcess, path: Path, coop: bool = False):
     # A co-op server cannot be paused through the menu. Its process must be
     # suspended for the entire read/check/write transaction.
     with game.suspended() if coop else nullcontext():
-        current_address, _, current = committed(game)
-        if current["version"] != metadata["version"]:
-            raise RuntimeError("The checkpoint save version differs from this game client. No game memory was changed.")
-        if (current["map"], current["map_checksum"], current["script_checksums"]) != (
-                metadata["map"], metadata["map_checksum"], metadata["script_checksums"]):
-            raise RuntimeError("The current map or scripts differ from the checkpoint. No game memory was changed.")
+        if opening:
+            # Startup must not serialize Ascension's transient lander intro.
+            # Only an archive from this executable/layout may seed the buffers.
+            source_hash = metadata.get("source_executable_sha256", metadata.get("executable_sha256"))
+            if source_hash != getattr(game, "executable_sha256", None):
+                raise RuntimeError("Opening restore requires a checkpoint from the same executable build")
+            current_address = game.u32(COMMITTED_PTR)
+            target = game.u32(WRITE_PTR)
+            if set((current_address, target)) != set(BUFFERS):
+                raise RuntimeError("Opening save buffers are not initialized")
+            for address in BUFFERS:
+                live = game.read(address, SAVE_SIZE)
+                if (game.u32(address + STATE_OFFSET) not in (0, 3) or
+                    struct.unpack_from("<I", live, 0)[0] != BUFFERS[address][0] or
+                    struct.unpack_from("<I", live, MEMFILE_SIZE)[0] != BUFFERS[address][1]):
+                    raise RuntimeError("Opening save buffer is busy or has invalid payload pointers")
+                for payload, size in zip(BUFFERS[address], BUFFER_SIZES):
+                    game.read(payload, size)
+            if game.u32(SAVE_QUEUE_COUNT) or game.u32(ASYNC_DISK_SAVE):
+                raise RuntimeError("A save request is already pending during opening restore")
+            # Signature-resolved addresses plus both initialized structures and
+            # identical source build/layout. No guessed data-section offsets.
+            game.layout_confirmed = True
+            # No current checkpoint exists to compare. Continue's engine-side
+            # map/script checksum validation remains authoritative; do not patch it.
+        else:
+            current_address, _, current = committed(game)
+            if current["version"] != metadata["version"]:
+                raise RuntimeError("The checkpoint save version differs from this game client. No game memory was changed.")
+            if (current["map"], current["map_checksum"], current["script_checksums"]) != (
+                    metadata["map"], metadata["map_checksum"], metadata["script_checksums"]):
+                raise RuntimeError("The current map or scripts differ from the checkpoint. No game memory was changed.")
         before = (game.u32(LEVEL_FRAME_ADDR), game.u32(LEVEL_TIME_ADDR))
         if coop:
             if before[1] == 0:
@@ -820,7 +846,10 @@ def restore(game: GameProcess, path: Path, coop: bool = False):
         validate_image(target, image)
         # Keep a reversible copy of the current checkpoint before process writes.
         backup = ARCHIVE / f"before-restore-{datetime.now():%Y%m%d-%H%M%S-%f}.bo1backup"
-        snapshot(game, 0).replace(backup)
+        if not opening:
+            snapshot(game, 0).replace(backup)
+        else:
+            backup = None  # no throwaway checkpoint or archive during startup
         try:
             for data, destination in zip((pieces["state.bin"], pieces["secondary.bin"]), BUFFERS[target]):
                 game.write(destination, data)
@@ -840,7 +869,8 @@ def restore(game: GameProcess, path: Path, coop: bool = False):
     print(f"Restored {metadata['map']} round {metadata['round']} into memory.")
     print("Return to the game console and run: loadgame_continue")
     print("After loading, restart automatic saves with: python .\\checkpoint.py watch")
-    print(f"Previous in-memory checkpoint: {backup}")
+    if backup:
+        print(f"Previous in-memory checkpoint: {backup}")
 
 
 class RoundTracker:
@@ -1224,6 +1254,25 @@ class LevelReloadTracker:
         return rewound or jumped or began_reading
 
 
+def capture_manual_checkpoint(game, round_number, save_lock=None, on_event=None):
+    """Archive a player-created checkpoint without touching auto-save state.
+
+    The engine has one save buffer pair. Disk captures and automatic requests
+    share its lock, but manual failures never stop the round detector.
+    """
+    try:
+        with save_lock if save_lock is not None else nullcontext():
+            path = snapshot(game, round_number)
+    except (OSError, RuntimeError) as error:
+        if on_event:
+            on_event("error", f"Manual checkpoint capture failed: {error}", None)
+        return False
+    print(f"Captured player F11 save: {path}", flush=True)
+    if on_event:
+        on_event("manual", round_number, path)
+    return True
+
+
 def watch(start_round: int | None = None, stop_event=None, on_event=None, save_lock=None,
           skip_initial_round: int | None = None, enable_recovery: bool = True,
           save_timing: str = "End of Rounds"):
@@ -1246,6 +1295,8 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
     reload_pending = False
     next_recovery = time.monotonic() + RECOVERY_INTERVAL
     unblocker = SaveQueueUnblocker()
+    auto_requests = {}  # completed round -> checkpoint label; manual capture never owns this queue
+    next_auto_attempt = 0
     try:
         while stop_event is None or not stop_event.is_set():
             found = game_pid()
@@ -1286,6 +1337,8 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                 reload_pending = False
                 next_recovery = time.monotonic() + RECOVERY_INTERVAL
                 unblocker = SaveQueueUnblocker()
+                auto_requests.clear()
+                next_auto_attempt = 0
                 if pid:
                     game = GameProcess(pid, write=True, suspend=True)
                     print(f"Attached to Black Ops process {pid}", flush=True)
@@ -1311,6 +1364,8 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                         reading = False
                     if reload_tracker.update(frame, level_time, time.monotonic(), reading):
                         reload_pending = True
+                        auto_requests.clear()
+                        next_auto_attempt = 0
                         marker_ready = False
                         resume_manual_after = time.monotonic() + 5
                         print("Detected a same-process checkpoint reload; waiting for its round.",
@@ -1378,17 +1433,11 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                         marker_ready = True
                     elif (not reload_pending and marker is not None and
                           marker != last_marker and current_round is not None):
-                        with save_lock if save_lock is not None else nullcontext():
-                            manual_path = snapshot(game, current_round)
-                        print(f"Captured player F11 save: {manual_path}", flush=True)
-                        if on_event:
-                            on_event("manual", current_round, manual_path)
-                        last_marker = marker
-                        tracker.round = current_round
-                        tracker.saved_round = current_round
-                        tracker.pending = None
-                        next_recovery = time.monotonic() + RECOVERY_INTERVAL
-                        RECOVERY_FILE.unlink(missing_ok=True)
+                        if capture_manual_checkpoint(game, current_round, save_lock, on_event):
+                            last_marker = marker
+                            next_recovery = time.monotonic() + RECOVERY_INTERVAL
+                            RECOVERY_FILE.unlink(missing_ok=True)
+                        # Never acknowledge or reset automatic round state here.
                     now = time.monotonic()
                     opening_ready = opening_round_ready(
                         scene, level_time, observed_round or end_tracker.round)
@@ -1430,6 +1479,11 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                                 if on_event:
                                     on_event("round_end", completed_round, None)
                     if round_number:
+                        auto_requests.setdefault(completed_round, round_number)
+                    round_number = None
+                    if auto_requests and not reload_pending and opening_ready and now >= next_auto_attempt:
+                        completed_round = next(iter(auto_requests))
+                        round_number = auto_requests[completed_round]
                         if game.foreground() or game.activate_window():
                             if save_lock is None:
                                 saved = request_and_save(game, round_number)
@@ -1438,6 +1492,7 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                                     saved = request_and_save(game, round_number)
                             if on_event:
                                 on_event("saved", round_number, saved)
+                            auto_requests.pop(completed_round, None)
                             tracker.saved_round = round_number
                             if completed_round is not None:
                                 end_tracker.mark_saved(completed_round)
@@ -1450,6 +1505,7 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                             if waiting_for_focus != round_number:
                                 print(f"Round {round_number} detected; return to Black Ops so F11 can save it.", flush=True)
                             waiting_for_focus = round_number
+                            next_auto_attempt = time.monotonic() + 1
                             if completed_round is not None:
                                 end_tracker.defer(time.monotonic())
                             else:
@@ -1463,6 +1519,7 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                         last_marker = (recovery_address, recovery_header["map"], recovery_header["save_id"])
                 except (OSError, RuntimeError) as error:
                     if round_number is not None:
+                        next_auto_attempt = time.monotonic() + 2
                         if completed_round is not None:
                             end_tracker.defer(time.monotonic())
                         else:

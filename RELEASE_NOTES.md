@@ -1,3 +1,23 @@
+# Black Ops Game Saves v1.0.29 - prerelease
+
+- Give automatic saves a separate pending-request queue. Manual F11 captures
+  cannot clear an automatic round edge, acknowledge it as saved, or reset its
+  tracker. Both paths continue using the same save library and overwrite policy.
+- Retain an automatic request when the engine delays a checkpoint commit or
+  the game is not focused. Manual archive errors no longer skip auto detection.
+- Regression tests cover manual round-one saves, manual saves while a fallback
+  autosave is due, manual archive failures, and failed auto commits followed by
+  a manual save, across all three timing settings.
+- Ascension Continue no longer requests a fresh devsave during the lander intro.
+  It stages the selected archive into initialized buffers and sends Continue.
+  This path requires matching executable provenance and memory layout, validates
+  both live buffer structures, and rejects busy buffers or pending save requests.
+  Existing server-script variants are unchanged; engine checksum checks remain.
+- Timing limitation: Continue is sent at the earliest observed map/buffer
+  readiness. This is NOT an exact initial_blackscreen_pass flag hook. Ascension
+  startup injection has synthetic tests but still needs live Steam/Plutonium
+  validation, so this build is published as a prerelease.
+
 # Black Ops Game Saves v1.0.28 — prerelease
 
 - Add Ascension power-vision reconciliation after Continue. New map-state

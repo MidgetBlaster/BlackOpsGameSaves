@@ -439,3 +439,16 @@ for map_name in ('zombie_cosmodrome', 'zombie_moon', 'zombie_paris'):
     assert special.sample < 10
 assert 'set scr_zm_extra_perk_all 1' in (core.ROOT / 'checkpoint.cfg').read_text()
 print('Restore before first round and Mule Kick configuration passed')
+
+# Ascension must never issue devsave during its transient lander opening.
+with (patch.object(core, "load_archive", return_value=({"map": "zombie_cosmodrome", "round": 4}, {})),
+      patch.object(game_launcher, "make_fresh_checkpoint") as bootstrap,
+      patch.object(core, "restore") as restore_mock,
+      patch.object(game_launcher, "wait_for_focus"),
+      patch.object(game_launcher, "wait_for_loaded_round", return_value=True)):
+    fresh_game.commands.clear()
+    game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "ascension.bo1checkpoint", "Solo")
+bootstrap.assert_not_called()
+assert restore_mock.call_args.kwargs == {"coop": True, "opening": True}
+assert fresh_game.commands == ["F12"]
+print("Ascension Continue skips the intro checkpoint")

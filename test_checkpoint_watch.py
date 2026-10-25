@@ -39,7 +39,8 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
              advance_round=True, advance_again=False, round_end_tick=None,
              missing_round=False, magic_transition=False, start_round=None,
              manual_continue=False, save_timing="End of Rounds",
-             initial_round=4, transition_byte=1, advance_after_manual=False):
+             initial_round=4, transition_byte=1, advance_after_manual=False,
+             manual_failure=False, auto_failures=0):
     game = FakeGame()
     game.round = initial_round
     clock = [0.0]
@@ -79,11 +80,17 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
             if magic_transition and self.ticks == 3:
                 game.magic = 500
 
+    attempts = [0]
     def save(_game, number):
+        attempts[0] += 1
+        if attempts[0] <= auto_failures:
+            raise core.CheckpointNotCommitted("Simulated delayed engine commit")
         game.save_id += 1
         return Path(f"round-{number}.bo1checkpoint")
 
     def manual_snapshot(_game, number):
+        if manual_failure:
+            raise OSError("Simulated manual archive error")
         return Path(f"player-{number}.bo1checkpoint")
 
     with TemporaryDirectory(dir=core.ROOT) as directory:
@@ -294,3 +301,24 @@ assert captures(exercise(player_f11=True, initial_round=1,
                          advance_round=False, round_end_tick=3,
                          transition_byte=255)) == [('manual', 1), ('saved', 1)]
 print('Round-one manual save followed by automatic save passed')
+
+# F11 arrives on the tick when a delayed fallback boundary becomes due.
+# Missing round bytes reproduce the post-Continue path that formerly lost it.
+for timing in core.SAVE_TIMINGS:
+    events = exercise(True, manual_tick=4, advance_round=False,
+                      missing_round=True, magic_transition=True, start_round=5,
+                      save_timing=timing)
+    expected = 6 if timing == "Start of Round" else 5
+    assert captures(events) == [("manual", 5), ("saved", expected)], (timing, events)
+    # A disk error from manual capture must not prevent the due automatic save.
+    events = exercise(True, manual_tick=4, advance_round=False,
+                      missing_round=True, magic_transition=True, start_round=5,
+                      save_timing=timing, manual_failure=True)
+    assert captures(events) == [("saved", expected)], (timing, events)
+    assert any(e[0] == "error" and "Manual" in e[1] for e in events)
+    # The round edge is one-shot: retain its request through a failed commit.
+    events = exercise(True, manual_tick=5, advance_round=False,
+                      missing_round=True, magic_transition=True, start_round=5,
+                      save_timing=timing, auto_failures=1)
+    assert captures(events) == [("manual", 6), ("saved", expected)], (timing, events)
+print("Pending autosaves survive manual captures, manual errors and delayed commits")
