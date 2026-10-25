@@ -449,7 +449,7 @@ for map_name in ('zombie_cosmodrome', 'zombie_moon', 'zombie_paris'):
 assert 'set scr_zm_extra_perk_all 1' in (core.ROOT / 'checkpoint.cfg').read_text()
 print('Restore before first round and Mule Kick configuration passed')
 
-# Old Ascension saves retain their original CSC and wait for the tested intro boundary.
+# Saved Ascension uses early readiness; new-game readiness remains unchanged.
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cosmodrome", "round": 4}, {})),
       patch.object(game_launcher, "wait_for_map_ready") as ready,
       patch.object(game_launcher, "make_fresh_checkpoint") as bootstrap,
@@ -459,11 +459,11 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cosmodrom
     fresh_game.commands.clear()
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "ascension.bo1checkpoint", "Solo")
 ready.assert_called_once_with(fresh_game,"zombie_cosmodrome",None,
-                              during_opening=False,allow_stale_checkpoint=True)
+                              during_opening=True,allow_stale_checkpoint=True)
 bootstrap.assert_called_once()
 assert restore_mock.call_args.kwargs == {"coop": True}
 assert fresh_game.commands == ["F12"]
-print("Ascension uses the verified intro boundary and validates a current checkpoint")
+print("Ascension resumes at early map readiness and validates a current checkpoint")
 
 # Restore the recorded film only after Continue has been confirmed.
 import ascension_vision

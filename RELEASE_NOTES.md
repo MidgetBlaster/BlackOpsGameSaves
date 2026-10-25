@@ -1,3 +1,11 @@
+# Black Ops Game Saves v1.0.32
+
+- Start saved Ascension games at the initialized-map boundary instead of waiting for the lander intro and round one. Continue is sent as soon as a fresh checkpoint has committed and the selected archive has been validated and restored.
+- New Game keeps the normal intro. Other maps' timing is unchanged.
+- Keeps v1.0.31's manual-save recovery, independent round autosaving, consistent buffer copies, and recorded Ascension film restoration.
+- Uses the early-readiness path exercised in the prior live Ascension test, where Continue succeeded and the user confirmed color and power returned. This is readiness-based, not a guaranteed 1.5-second offset or exact black-screen frame. Loading/intro may remain visible briefly while the engine prepares its checkpoint.
+- Combined Steam/Plutonium installer; regular release with the installer as its only attached asset.
+
 # Black Ops Game Saves v1.0.31
 
 - Recover a stalled devsave disk pointer even when it still references a committed checkpoint. Live Steam testing confirmed further saves committed after the first manual save had blocked the queue.

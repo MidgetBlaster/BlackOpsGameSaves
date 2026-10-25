@@ -374,10 +374,11 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
         except (OSError, RuntimeError, ValueError, KeyError) as error:
             metadata["weapon_restore_warning"] = f"Could not read the saved equipped weapon: {error}"
     if metadata["map"] == "zombie_cosmodrome":
-        # The original CSC has no companion handshake. Preserve its saved VM
-        # and use the live-tested post-lander boundary, not an arbitrary early timer.
+        # Saved games resume at the initialized-map boundary, as verified by
+        # the early Continue test. Do not wait for the lander or round one.
+        # The original client script and checkpoint validation remain required.
         wait_for_map_ready(game, metadata["map"], cancel,
-                           during_opening=False, allow_stale_checkpoint=True)
+                           during_opening=True, allow_stale_checkpoint=True)
     make_fresh_checkpoint(game, metadata["map"], cancel)
     if mode not in ("Solo", "Co-op"):
         raise ValueError("Choose Solo or Co-op for this save before starting it")
