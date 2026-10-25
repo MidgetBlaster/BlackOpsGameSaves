@@ -464,3 +464,19 @@ bootstrap.assert_called_once()
 assert restore_mock.call_args.kwargs == {"coop": True}
 assert fresh_game.commands == ["F12"]
 print("Ascension uses the verified intro boundary and validates a current checkpoint")
+
+# Restore the recorded film only after Continue has been confirmed.
+import ascension_vision
+for map_name in ("zombie_cosmodrome", "zombie_moon"):
+    order=[]
+    metadata={"map":map_name,"round":4,"ascension_vision":{"format":1}}
+    with (patch.object(core,"load_archive",return_value=(metadata,{})),
+          patch.object(game_launcher,"wait_for_map_ready"),
+          patch.object(game_launcher,"make_fresh_checkpoint"),
+          patch.object(core,"restore"),
+          patch.object(game_launcher,"wait_for_focus"),
+          patch.object(game_launcher,"wait_for_loaded_round",side_effect=lambda *a,**k:order.append("loaded") or True),
+          patch.object(ascension_vision,"restore",side_effect=lambda *a:order.append("vision"))):
+        game_launcher.restore_and_continue(fresh_game,core.ARCHIVE/"vision.bo1checkpoint","Solo")
+    assert order == (["loaded","vision"] if map_name=="zombie_cosmodrome" else ["loaded"])
+print("Ascension-only vision restoration occurs after confirmed Continue")

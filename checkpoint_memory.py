@@ -680,10 +680,20 @@ def committed(game: GameProcess) -> tuple[int, bytes, dict]:
 
 
 def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -> Path:
-    address, image, h = committed(game)
-    parts = [game.read(addr, size) for addr, size in zip(BUFFERS[address], BUFFER_SIZES)]
-    if game.u32(COMMITTED_PTR) != address or game.read(address, SAVE_SIZE) != image:
-        raise RuntimeError("The game changed the save while it was being copied; retry")
+    captured_vision = None
+    vision_warning = None
+    # Copy one committed generation while the engine cannot swap/reuse its buffers.
+    with game.suspended():
+        address, image, h = committed(game)
+        parts = [game.read(addr, size) for addr, size in zip(BUFFERS[address], BUFFER_SIZES)]
+        if game.u32(COMMITTED_PTR) != address or game.read(address, SAVE_SIZE) != image:
+            raise RuntimeError("The game changed the save while it was being copied; retry")
+        if h["map"] == "zombie_cosmodrome":
+            import ascension_vision
+            try:
+                captured_vision = ascension_vision.capture(game)
+            except (OSError, RuntimeError, ValueError) as error:
+                vision_warning = str(error)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     if target is None:
         target = ARCHIVE / f"{h['map']}-round-{round_number:03d}-{stamp}.bo1checkpoint"
@@ -724,6 +734,10 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
         metadata["map_state_coverage"] = {
             "server": "engine_script_vm",
             "client_resync": ["ascension_power_vision"] if h["map"] == "zombie_cosmodrome" else []}
+    if captured_vision is not None:
+        metadata["ascension_vision"] = captured_vision
+    elif vision_warning:
+        metadata["ascension_vision_warning"] = vision_warning
     pieces = {"save.bin": image, "state.bin": parts[0], "secondary.bin": parts[1]}
     metadata["sha256"] = {name: hashlib.sha256(data).hexdigest() for name, data in pieces.items()}
     temporary = target.with_suffix(".part")
@@ -1050,7 +1064,8 @@ class SaveQueueUnblocker:
         if not 0 < count <= 3 or pointer not in BUFFERS:
             self.signature = self.since = self.first_frame = None
             return False
-        if (game.u32(pointer + STATE_OFFSET) != 0 or
+        state = game.u32(pointer + STATE_OFFSET)
+        if (state not in (0, 3) or
                 game.read(pointer + CALLBACK_NOW_OFFSET, 1) != b"\0"):
             self.signature = self.since = self.first_frame = None
             return False
@@ -1065,16 +1080,19 @@ class SaveQueueUnblocker:
         if not expected_requests():
             self.signature = self.since = self.first_frame = None
             return False
-        signature = (pointer, ids)
+        signature = (pointer, state, ids)
         if signature != self.signature:
             self.signature, self.since = signature, now
             self.first_frame = game.u32(LEVEL_FRAME_ADDR)
             return False
-        if now - self.since < 3 or game.u32(LEVEL_FRAME_ADDR) - self.first_frame < 20:
+        # A committed buffer can also retain the abandoned disk pointer.
+        # Give that case a longer grace period; never release a writing/reading buffer.
+        grace = 8 if state == 3 else 3
+        if now - self.since < grace or game.u32(LEVEL_FRAME_ADDR) - self.first_frame < 20:
             return False
         with game.suspended():
             if (game.u32(ASYNC_DISK_SAVE) != pointer or
-                    game.u32(pointer + STATE_OFFSET) != 0 or
+                    game.u32(pointer + STATE_OFFSET) != state or
                     game.read(pointer + CALLBACK_NOW_OFFSET, 1) != b"\0" or
                     game.u32(SAVE_QUEUE_COUNT) != count or not expected_requests() or
                     any(game.u32(SAVE_QUEUE + index * SAVE_REQUEST_SIZE + 0x180) != ids[index]
@@ -1188,7 +1206,7 @@ def effective_scene(game: GameProcess, raw_scene: int) -> tuple[int | None, str 
 
 
 def archived_round_for_header(map_name: str, save_id: int,
-                              save_image: bytes | None = None) -> int | None:
+                              save_image: bytes | None = None, *, include_metadata: bool = False):
     """Recover the round of a checkpoint resumed with an in-game Continue."""
     digest = hashlib.sha256(save_image).hexdigest() if save_image else None
     # Restore publishes an archive into the other engine buffer. Its two
@@ -1213,12 +1231,14 @@ def archived_round_for_header(map_name: str, save_id: int,
                 if isinstance(number, int) and number > 0:
                     possible_rounds.add(number)
                     if digest is None or metadata.get("sha256", {}).get("save.bin") == digest:
-                        return number
+                        return metadata if include_metadata else number
                     if portable is not None and portable_digest(
                             archive.read("save.bin")) == portable:
-                        return number
+                        return metadata if include_metadata else number
         except (OSError, ValueError, KeyError, zipfile.BadZipFile):
             continue
+    if include_metadata:
+        return None  # vision data requires an exact checkpoint match
     return next(iter(possible_rounds)) if len(possible_rounds) == 1 else None
 
 
@@ -1410,6 +1430,17 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                                 reload_header["map"], reload_header["save_id"], reload_image)
                             resumed_round = (archived_round if archived_round is not None else
                                              observed_round or (0 if scene == 76 else last_round or 1))
+                            if scene == 20:
+                                saved_metadata = archived_round_for_header(
+                                    reload_header["map"], reload_header["save_id"], reload_image,
+                                    include_metadata=True)
+                                if saved_metadata and saved_metadata.get("ascension_vision"):
+                                    import ascension_vision
+                                    try:
+                                        ascension_vision.restore(game, saved_metadata["ascension_vision"])
+                                    except (OSError, RuntimeError, ValueError) as error:
+                                        if on_event:
+                                            on_event("error", f"Ascension vision restore: {error}", None)
                             moon_round_one_queued = resumed_round >= 1
                             if scene == 76 and resumed_round == 0:
                                 # The reload marker is already acknowledged below.
@@ -1473,6 +1504,15 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                             RECOVERY_FILE.unlink(missing_ok=True)
                         # Never acknowledge or reset automatic round state here.
                     now = time.monotonic()
+                    if observed_round is not None:
+                        # Keep the independent HUD/magic fallback warm while the
+                        # round byte works. devsave/Continue can zero that byte.
+                        tracker.round = observed_round
+                        tracker.start_round = observed_round
+                        tracker.scene = scene
+                        tracker.timer = timer
+                        tracker.magic = magic
+                        tracker.skipped = True
                     opening_ready = opening_round_ready(
                         scene, level_time, observed_round or end_tracker.round)
                     if scene == 76:
@@ -1507,7 +1547,8 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                             if on_event:
                                 on_event("round_end", completed_round, None)
                     elif (not reload_pending and opening_ready and observed_round is None
-                          and (start_round is not None or skip_initial_round is not None)):
+                          and (start_round is not None or skip_initial_round is not None
+                               or end_tracker.round is not None)):
                         fallback = tracker.update(scene, menu, timer, magic, now)
                         if fallback is not None:
                             completed_round = max(1, fallback - 1)
@@ -1646,7 +1687,7 @@ def main():
         if not pid:
             raise RuntimeError("Start Black Ops and load the map first")
         game = GameProcess(pid, write=args.action in ("save", "restore"),
-                           suspend=args.action == "save" or (args.action == "restore" and args.coop))
+                           suspend=args.action in ("save", "capture") or (args.action == "restore" and args.coop))
         try:
             if args.action == "save":
                 print("Switch to Black Ops now; requesting a save in 5 seconds...", flush=True)

@@ -1,3 +1,14 @@
+# Black Ops Game Saves v1.0.31
+
+- Recover a stalled devsave disk pointer even when it still references a committed checkpoint. Live Steam testing confirmed further saves committed after the first manual save had blocked the queue.
+- Keep the alternate round detector active when devsave clears the round byte, including fresh games. Manual saves do not consume automatic round requests. Tests cover three consecutive automatic rounds with manual saves between each.
+- Briefly suspend the engine while copying checkpoint buffers, preventing mixed checkpoint generations and intermittent capture failures.
+- New Ascension checkpoints record their local film/color values. Restore those values after confirmed Continue without changing the original client script. The powered-save live test restored matching values and the user confirmed color and power returned.
+- Manual Continue can restore the recorded vision when the watcher identifies an exact archive match. Other maps are unaffected.
+- Older checkpoints without recorded vision values cannot reconstruct those missing values. Renderer layouts must match the checked instructions; otherwise saving continues with a vision warning. Cooperative clients' individual visual states and the Plutonium vision path have not been live-tested.
+- Keep the established Ascension startup timing. Exact first-frame-after-black-screen timing is not claimed by this release.
+- Combined installer supports Steam and Plutonium; only the installer is attached to the release.
+
 # Black Ops Game Saves v1.0.30 - prerelease
 
 - Reset round labels and automatic progression after map_restart/fast_restart instead of reusing stale checkpoint rounds.

@@ -41,7 +41,7 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
              manual_continue=False, save_timing="End of Rounds",
              initial_round=4, transition_byte=1, advance_after_manual=False,
              manual_failure=False, auto_failures=0, scene=204,
-             resume_archive_round=2, reload_ticks=(2,), first_round_tick=None, restart=False):
+             resume_archive_round=2, reload_ticks=(2,), first_round_tick=None, restart=False, lose_round_after_manual=False, rounds=None):
     game = FakeGame()
     game.round = initial_round
     clock = [0.0]
@@ -51,6 +51,8 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
         ticks = 0
 
         def is_set(self):
+            if rounds is not None:
+                return self.ticks >= 18
             return self.ticks >= (8 if manual_continue and
                                  save_timing != "End of Rounds" else 7)
 
@@ -73,12 +75,16 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
                 game.round_change = False
             if player_f11 and self.ticks in (manual_tick if isinstance(manual_tick, tuple) else (manual_tick,)):
                 game.save_id += 1
+                if lose_round_after_manual:
+                    game.round = 0
             if advance_round and (not player_f11 or advance_after_manual) and self.ticks == 3:
                 game.round = initial_round + 1
             if advance_again and self.ticks == 5:
                 game.round = 6
             if round_end_tick == self.ticks:
                 game.round_change = transition_byte
+            if rounds and self.ticks in rounds:
+                game.round = rounds[self.ticks]
             if self.ticks == first_round_tick:
                 game.round = 1
             if magic_transition and self.ticks == 2:
@@ -365,3 +371,21 @@ for command in ("map_restart", "fast_restart"):
                       advance_round=False, resume_archive_round=9, first_round_tick=4)
     assert captures(events)[0:2] == [("manual", 0), ("saved", 1)], captures(events)
 print("Restart discards stale archive rounds and rearms autosaving, including Moon")
+
+# A fresh session has no start/skip baseline. Its first manual save can
+# invalidate the HUD byte; the magic fallback must still save the next boundary.
+for timing in core.SAVE_TIMINGS:
+    events = exercise(True, initial_round=1, advance_round=False,
+                      lose_round_after_manual=True, magic_transition=True,
+                      save_timing=timing)
+    expected = 2 if timing == "Start of Round" else 1
+    assert captures(events) == [("manual", 1), ("saved", expected)], captures(events)
+print("First manual save losing the round byte does not disable autosaving")
+
+for timing in core.SAVE_TIMINGS:
+    events = exercise(True, initial_round=1, advance_round=False,
+                      manual_tick=(1, 6, 11), rounds={3:2, 8:3, 13:4},
+                      save_timing=timing)
+    assert captures(events) == [("manual",1),("saved",2),("manual",2),
+                                ("saved",3),("manual",3),("saved",4)], captures(events)
+print("Three consecutive rounds autosave with manual saves between every boundary")

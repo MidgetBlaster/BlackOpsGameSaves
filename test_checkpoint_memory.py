@@ -281,8 +281,9 @@ with tempfile.TemporaryDirectory(dir=c.ROOT) as directory:
     recovered = c.promote_recovery()
     assert recovered.exists() and not c.RECOVERY_FILE.exists()
     assert c.load_archive(recovered)[0]['round'] == 7
+    before_suspend = game.suspend_calls
     c.restore(game, path, coop=True)
-    assert game.suspend_calls == 1
+    assert game.suspend_calls == before_suspend + 2  # backup copy plus restore
     assert game.u32(c.COMMITTED_PTR) == c.SAVE_A
     game.write(c.SAVE_A + c.HEADER_OFFSET + 4, struct.pack('<I', 999))
     before = game.read(c.BUFFERS[c.SAVE_A][0], 4)

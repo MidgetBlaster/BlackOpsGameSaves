@@ -432,6 +432,12 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
             "Black Ops did not confirm that the selected checkpoint resumed. "
             "The saved file has been kept. Check the game console for a load error "
             "and retry Continue after the map is playable.")
+    if metadata["map"] == "zombie_cosmodrome" and metadata.get("ascension_vision"):
+        import ascension_vision
+        try:
+            ascension_vision.restore(game, metadata["ascension_vision"])
+        except (OSError, RuntimeError, ValueError) as error:
+            metadata["resume_warning"] = f"Checkpoint loaded, but Ascension vision was not restored: {error}"
     if weapon_config:
         wait_for_focus(game, cancel)
         game.press_game_key(0x73, "F4 equipped weapon restore")
