@@ -8,7 +8,7 @@ FROM, TO, CURRENT, NAME = 0xC7668, 0xC90A8, 0xCAAE8, 0xCC5A0
 FILM_SIZE = 0x78
 
 
-def locate(game):
+def locate(game, *, map_name="zombie_cosmodrome"):
     # Validate the retail instruction layout and obtain its actual CG pointer.
     # Unsupported code gets no guessed renderer writes.
     code = game.read(UPDATE, 0x88)
@@ -22,8 +22,9 @@ def locate(game):
     if not 0x10000 <= cg < 0x7FE00000:
         raise RuntimeError("Ascension client view is not initialized")
     name = game.read(cg + NAME, 64).split(b"\0", 1)[0].decode("ascii")
-    if name != "default" and not name.startswith("zombie_cosmodrome"):
-        raise RuntimeError("Ascension vision is not active")
+    allowed = ("default", "zombie_coast_powerOn") if map_name == "zombie_moon" else ("default",)
+    if name not in allowed and not name.startswith(map_name):
+        raise RuntimeError(f"{map_name} vision is not active")
     return cg, name
 
 

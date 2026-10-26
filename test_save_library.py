@@ -101,3 +101,14 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directo
         lib.ARCHIVE = original_archive
 
 print("Save catalog grouping, rename, favorite, and deletion passed")
+
+# Old history-based cached stats refresh once using the current inventory decoder.
+from unittest.mock import patch
+from save_library import populate_player_stats
+entry={"stats_source":"archive","players":[{"weapons":"old gun history"}]}
+with patch("save_library.extract_players",return_value=[{"weapons":"current loadout"}]) as decode:
+    assert populate_player_stats(Path("cache-test.bo1checkpoint"),entry)
+    assert entry["players"][0]["weapons"] == "current loadout"
+    assert not populate_player_stats(Path("cache-test.bo1checkpoint"),entry)
+    decode.assert_called_once()
+print("Legacy weapon history cache refreshes once")

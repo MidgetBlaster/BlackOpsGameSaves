@@ -19,11 +19,11 @@ def test_decoder():
 
 
 def test_two_players():
-    names = ("m1911_zm", "thompson_zm")
+    names = ("m1911_zm", "thompson_zm", "ray_gun_zm")
     weapon_data = struct.pack("<I", len(names) + 1) + b"".join(
         bytes((len(name),)) + name.encode("ascii") for name in names)
     globals_data = bytearray(268)
-    globals_data[204] = 0b00000010
+    globals_data[204] = 0b00001110 # includes a discarded Thompson
     globals_data[220] = 0b00000100
     state = bytearray(0x6000)
     for base, client, name, weapon, points, kills, downs, revives in (
@@ -32,6 +32,9 @@ def test_two_players():
     ):
         state[base + 0x130] = client
         state[base + 0x144] = weapon
+        struct.pack_into("<I", state, base + 0x1DC, weapon)
+        if client == 0:
+            struct.pack_into("<I", state, base + 0x1DC + 0x18, 3)
         state[base + 0x1AA0:base + 0x1AA0 + len(name) + 1] = name + b"\0"
         state[base + 0x1B38:base + 0x1B38 + len(name) + 1] = name + b"\0"
         struct.pack_into("<ii", state, base + 0x1B88, points, kills)
@@ -40,7 +43,7 @@ def test_two_players():
                       return_value=(weapon_data, bytes(globals_data), bytes(state))):
         players = checkpoint_stats.extract_players(Path("synthetic.bo1checkpoint"))
     assert players == [
-        {"name": "Alice", "points": 2350, "weapons": "M1911 (equipped)",
+        {"name": "Alice", "points": 2350, "weapons": "M1911 (equipped), Ray Gun",
          "client_slot": 0, "equipped_weapon_raw": "m1911_zm",
          "revives": 0, "downs": 1, "kills": 18},
         {"name": "Bob", "points": 4170, "weapons": "Thompson (equipped)",

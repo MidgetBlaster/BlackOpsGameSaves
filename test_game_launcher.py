@@ -276,7 +276,7 @@ with (patch.object(core, "load_archive", return_value=({
         ascension_game, core.ARCHIVE / "ascension.bo1checkpoint", "Solo")
 assert ascension_game.commands == ["F12", "F12"]
 assert "resume_warning" not in restored
-assert map_ready.call_count == 2
+assert map_ready.call_count == 1
 map_ready.assert_called_with(ascension_game, "zombie_cosmodrome", None,
                                   during_opening=True, allow_stale_checkpoint=True)
 assert loaded.call_args_list[1].kwargs["timeout"] == 20
@@ -459,8 +459,7 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cosmodrom
       patch.object(game_launcher, "wait_for_loaded_round", return_value=True)):
     fresh_game.commands.clear()
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "ascension.bo1checkpoint", "Solo")
-ready.assert_called_once_with(fresh_game,"zombie_cosmodrome",None,
-                              during_opening=True,allow_stale_checkpoint=True)
+ready.assert_not_called()
 bootstrap.assert_called_once()
 assert restore_mock.call_args.kwargs["coop"] is True
 assert restore_mock.call_args.kwargs["prepared_archive"][0]["map"] == "zombie_cosmodrome"
@@ -510,3 +509,77 @@ with (patch.object(core,"load_archive",return_value=(metadata,pieces)),
     game_launcher.start_selected_game(path,"Solo")
 assert order == ["prepare","map"]
 print("Ascension preparation precedes the map switch")
+
+# All three maps submit Continue immediately after the bootstrap/restore sequence.
+for map_name in ("zombie_cod5_factory", "zombie_cosmodrome", "zombie_moon"):
+    events=[]
+    with (patch.object(core,"load_archive",return_value=({"map":map_name,"round":4},{})),
+          patch.object(game_launcher,"prepare_restore_options",return_value=False),
+          patch.object(game_launcher,"wait_for_map_ready") as ready,
+          patch.object(game_launcher,"make_fresh_checkpoint",side_effect=lambda *a:events.append("checkpoint")),
+          patch.object(core,"restore",side_effect=lambda *a,**k:events.append("restore")),
+          patch.object(game_launcher,"wait_for_focus"),
+          patch.object(game_launcher,"wait_for_loaded_round",return_value=True),
+          patch.object(fresh_game,"press_load",side_effect=lambda:events.append("continue"))):
+        game_launcher.restore_and_continue(fresh_game,core.ARCHIVE/"timing.bo1checkpoint","Solo")
+    ready.assert_not_called()
+    assert events == ["checkpoint","restore","continue"]
+print("Der Riese, Ascension and Moon share the immediate restore sequence")
+
+# Moon applies the overlay at Continue and after renderer reset, never other maps.
+import moon_gasmask
+for map_name in ("zombie_moon", "zombie_cosmodrome"):
+    events=[]
+    metadata={"map":map_name,"round":2,"moon_gasmask":{"format":1,"map":"zombie_moon","worn":True}}
+    with (patch.object(core,"load_archive",return_value=(metadata,{})),
+          patch.object(game_launcher,"prepare_restore_options",return_value=False),
+          patch.object(game_launcher,"make_fresh_checkpoint"),
+          patch.object(core,"restore"),patch.object(game_launcher,"wait_for_focus"),
+          patch.object(game_launcher,"wait_for_loaded_round",return_value=True),
+          patch.object(moon_gasmask,"restore",side_effect=lambda *a:events.append("mask")),
+          patch.object(fresh_game,"press_load",side_effect=lambda:events.append("continue"))):
+        game_launcher.restore_and_continue(fresh_game,core.ARCHIVE/"mask.bo1checkpoint","Solo")
+    assert events == (["mask","continue","mask"] if map_name=="zombie_moon" else ["continue"])
+print("Moon overlay restoration brackets Continue without affecting other maps")
+
+# Round-one Moon restores client rendering before the normal confirmation delay.
+from unittest.mock import Mock
+clock=[0.0]
+frames=[0]
+def read_resume(address):
+    if address == core.LEVEL_FRAME_ADDR:
+        frames[0]+=1
+        return frames[0]
+    if address == core.LEVEL_TIME_ADDR: return frames[0]*50
+    if address == core.MENU_ADDR: return 0
+    if address == core.COMMITTED_PTR: return next(iter(core.BUFFERS))
+    if address == next(iter(core.BUFFERS))+core.STATE_OFFSET: return 4 if frames[0]==1 else 3
+    return 0
+applied=[]
+def apply_overlay():
+    applied.append(clock[0])
+    return len(applied)>1 # first resumed frame can precede material initialization
+with (patch.object(game_launcher.time,"monotonic",side_effect=lambda:clock[0]),
+      patch.object(game_launcher.time,"sleep",side_effect=lambda seconds:clock.__setitem__(0,clock[0]+seconds)),
+      patch.object(core,"live_round",return_value=1)):
+    assert game_launcher.wait_for_loaded_round(Mock(u32=read_resume),1,
+        before_clock=(100,5000),on_resume=apply_overlay)
+assert len(applied)==2 and applied[-1]<0.1
+assert clock[0]>=1.5
+print("Round-one overlay retries on resumed frames before load confirmation")
+
+# A vision-only Moon save also enables first-frame restoration (no P.E.S. required).
+import moon_vision
+metadata={"map":"zombie_moon","round":0,"moon_vision":{"format":1}}
+with (patch.object(core,"load_archive",return_value=(metadata,{})),
+      patch.object(game_launcher,"prepare_restore_options",return_value=False),
+      patch.object(game_launcher,"make_fresh_checkpoint"),patch.object(core,"restore"),
+      patch.object(game_launcher,"wait_for_focus"),
+      patch.object(game_launcher,"wait_for_loaded_round",return_value=True) as waited,
+      patch.object(moon_vision,"restore") as vision,
+      patch.object(moon_gasmask,"restore") as mask):
+    game_launcher.restore_and_continue(fresh_game,core.ARCHIVE/"nml.bo1checkpoint","Solo")
+    assert callable(waited.call_args.kwargs["on_resume"])
+    assert vision.call_count==2
+    mask.assert_not_called()
+print("Moon round-zero vision loads independently of gas-mask state")

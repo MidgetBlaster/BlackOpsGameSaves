@@ -112,7 +112,7 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
                            None if missing_round or game.round <= 0 else game.round),
               patch.object(core, "effective_scene", return_value=(scene, None)),
               patch.object(core, "archived_round_for_header",
-                           side_effect=lambda *_: resume_archive_round if manual_continue else None),
+                           side_effect=lambda *_, **kw: (None if kw.get("include_metadata") else resume_archive_round) if manual_continue else None),
               patch.object(core, "committed", side_effect=lambda _game: (
                   core.SAVE_A, b"", {"map": "zombie_cod5_factory", "save_id": game.save_id})),
               patch.object(core, "snapshot", side_effect=manual_snapshot),

@@ -384,19 +384,13 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
         weapon_config = prepare_restore_options(save_path, metadata)
 
     power_config = round_bridge_scripts(metadata)
-    if metadata["map"] == "zombie_cosmodrome":
-        # Saved games resume at the initialized-map boundary, as verified by
-        # the early Continue test. Do not wait for the lander or round one.
-        # The original client script and checkpoint validation remain required.
-        wait_for_map_ready(game, metadata["map"], cancel,
-                           during_opening=True, allow_stale_checkpoint=True)
     make_fresh_checkpoint(game, metadata["map"], cancel)
     if mode not in ("Solo", "Co-op"):
         raise ValueError("Choose Solo or Co-op for this save before starting it")
     _check_cancel(cancel)
     # Suspend the live server for either mode. The solo pause menu intercepts
     # console and bound keys, preventing the final continue command.
-    if metadata["map"] == "zombie_cosmodrome":
+    if metadata["map"] in ("zombie_cosmodrome", "zombie_moon"):
         core.restore(game, save_path, coop=True, prepared_archive=(metadata, pieces))
     else:
         core.restore(game, save_path, coop=True)
@@ -410,14 +404,18 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
         game.press_game_key(0x73, "F4 equipped weapon restore before Continue")
     # Start Game restores under a brief process suspension, so the pause menu
     # is closed and F12 reaches the engine's loadgame_continue binding.
+    # Apply at Continue, then reapply after the engine resets client rendering.
+    restore_moon_visuals(game, metadata)
     game.press_load()
     if power_config:
         # The first request reaches the opening screen; repeat it as the
         # restored script VM resumes so power is applied before play begins.
         time.sleep(0.2)
         game.press_game_key(0x71, "F2 restore power state during Continue")
+    early_overlay = ({"on_resume": lambda: restore_moon_visuals(game, metadata)}
+                     if metadata.get("map") == "zombie_moon" and (metadata.get("moon_gasmask") or metadata.get("moon_vision")) else {})
     resumed = wait_for_loaded_round(game, metadata.get("round"), cancel,
-                                    timeout=8, before_clock=before_continue)
+                                    timeout=8, before_clock=before_continue, **early_overlay)
     if not resumed:
         try:
             saved_round = metadata.get("round")
@@ -436,7 +434,7 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
                                game.u32(core.LEVEL_TIME_ADDR))
             game.press_load()
             resumed = wait_for_loaded_round(game, metadata.get("round"), cancel,
-                                            timeout=20, before_clock=before_continue)
+                                            timeout=20, before_clock=before_continue, **early_overlay)
             if not resumed and core.live_round(game) == 1:
                 raise RuntimeError(
                     f"{metadata['map']} stayed at round 1 after two Continue attempts. "
@@ -447,6 +445,7 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
             "Black Ops did not confirm that the selected checkpoint resumed. "
             "The saved file has been kept. Check the game console for a load error "
             "and retry Continue after the map is playable.")
+    restore_moon_visuals(game, metadata)
     if metadata["map"] == "zombie_cosmodrome" and metadata.get("ascension_vision"):
         import ascension_vision
         try:
@@ -460,6 +459,25 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
         wait_for_focus(game, cancel)
         game.press_game_key(0x72, "F3 local movement fix")
     return metadata
+
+
+def restore_moon_visuals(game, metadata):
+    if metadata.get("map") != "zombie_moon":
+        return True
+    import moon_gasmask, moon_vision
+    errors = []
+    for key, module in (("moon_vision", moon_vision), ("moon_gasmask", moon_gasmask)):
+        if metadata.get(key):
+            try:
+                module.restore(game, metadata[key])
+            except (OSError, RuntimeError, ValueError) as error:
+                errors.append(f"{key}: {error}")
+    if errors:
+        metadata["resume_warning"] = "Moon visuals: " + "; ".join(errors)
+        return False
+    if metadata.get("resume_warning", "").startswith("Moon visuals:"):
+        metadata.pop("resume_warning", None)
+    return True
 
 
 def power_restore_config(power_on: bool, *, map_state: bool = False):
@@ -506,7 +524,8 @@ def weapon_restore_config(save_path: Path) -> bool:
 def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
                           cancel: threading.Event | None = None,
                           timeout: float = 20,
-                          *, before_clock: tuple[int, int] | None = None) -> bool:
+                          *, before_clock: tuple[int, int] | None = None,
+                          on_resume=None) -> bool:
     """Confirm Continue by save-reader state, clock change, or restored round."""
     if not saved_round and before_clock is None:
         return False
@@ -514,6 +533,7 @@ def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
     last_frame = None
     stable = 0
     load_started = False
+    overlay_applied = False
     while time.monotonic() - started < timeout:
         _check_cancel(cancel)
         try:
@@ -527,14 +547,21 @@ def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
                 if (frame + 20 < prior_frame or level_time + 1000 < prior_time or
                         level_time > prior_time + elapsed * 1000 + 5000):
                     load_started = True
+            reading = False
             try:
                 committed_address = game.u32(core.COMMITTED_PTR)
                 if committed_address in core.BUFFERS and \
                         game.u32(committed_address + core.STATE_OFFSET) == 4:
                     load_started = True
+                    reading = True
             except OSError as error:
                 if isinstance(error, PermissionError) or error.errno not in (299, 487, 998):
                     raise
+            # The engine clears client rendering during Continue. Restore on
+            # its first resumed frame, not after the 1.5-second confirmation.
+            if (on_resume is not None and not overlay_applied and load_started and
+                    not reading and menu == 0 and last_frame is not None and frame > last_frame):
+                overlay_applied = bool(on_resume())
             round_matches = (isinstance(saved_round, int) and saved_round > 0 and
                              observed in (saved_round, saved_round + 1))
             if (menu == 0 and (load_started or
@@ -550,7 +577,7 @@ def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
             if isinstance(error, PermissionError) or error.errno not in (299, 487, 998):
                 raise
             stable = 0
-        time.sleep(0.25)
+        time.sleep(0.01 if on_resume is not None and not overlay_applied else 0.25)
     return False
 
 
@@ -559,7 +586,7 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
     metadata, pieces = core.load_archive(save_path)
     core.validate_client_script(metadata)
     prepared = None
-    if metadata["map"] == "zombie_cosmodrome":
+    if metadata["map"] in ("zombie_cosmodrome", "zombie_moon"):
         prepared = (Path(save_path).resolve(), metadata, pieces,
                     prepare_restore_options(save_path, metadata))
     def ready_result(game):

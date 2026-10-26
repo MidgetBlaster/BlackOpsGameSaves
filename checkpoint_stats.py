@@ -182,11 +182,15 @@ def extract_players(path: Path) -> list[dict]:
                 0 <= revives <= 10_000):
             continue
         active = state[base + 0x144]
-        mask = globals_data[204 + client * 16:220 + client * 16]
-        held = [index for index in range(1, min(128, len(names)))
-                if mask[index // 8] & (1 << (index % 8))]
-        if active and active not in held:
+        # Retail SP getweaponrenderoptions (0x7D8189): 15 inventory
+        # records at ps+0x1DC, stride 0x18. Global masks retain history.
+        inventory = [struct.unpack_from("<I", state, base + 0x1DC + slot * 0x18)[0]
+                     for slot in range(15)]
+        held = list(dict.fromkeys(index for index in inventory if 0 < index < len(names)))
+        if active >= len(names):
             continue
+        if active and active not in held:
+            held.insert(0, active)
         held.sort(key=lambda index: (index != active, index))
         loadout = ", ".join(_weapon_label(names[index]) +
                             (" (equipped)" if index == active else "") for index in held)

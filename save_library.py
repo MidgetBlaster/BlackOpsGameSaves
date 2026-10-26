@@ -43,7 +43,7 @@ def checkpoint_details(path: Path) -> dict:
 
 def populate_player_stats(path: Path, entry: dict) -> bool:
     """Decode display details once per file; never alter the checkpoint."""
-    if entry.get("stats_source") or entry.get("stats_error") or entry.get("error"):
+    if entry.get("stats_version") == 2 or entry.get("error"):
         return False
     try:
         players = extract_players(path)
@@ -54,7 +54,9 @@ def populate_player_stats(path: Path, entry: dict) -> bool:
         entry["players"] = players
         if players:
             entry["player_count"] = len(players)
+        entry.pop("stats_error", None)
         entry["stats_source"] = "archive"
+    entry["stats_version"] = 2
     return True
 
 
@@ -112,6 +114,7 @@ class SaveLibrary:
                         entry.pop("players", None)
                         entry.pop("player_count", None)
                         entry.pop("stats_source", None)
+                        entry.pop("stats_version", None)
                         entry.pop("stats_error", None)
                     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
                         entry.update(error=str(exc), file_mtime_ns=modified)
@@ -183,6 +186,7 @@ class SaveLibrary:
             entry.pop("players", None)
             entry.pop("player_count", None)
             entry.pop("stats_source", None)
+            entry.pop("stats_version", None)
             entry.pop("stats_error", None)
         entry.update(details)
         entry.update(profile_id=profile_id, kind=kind, error="",
@@ -263,6 +267,7 @@ class SaveLibrary:
         entry.pop("players", None)
         entry.pop("player_count", None)
         entry.pop("stats_source", None)
+        entry.pop("stats_version", None)
         entry.pop("stats_error", None)
         populate_player_stats(target, entry)
         self.write()

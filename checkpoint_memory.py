@@ -682,6 +682,10 @@ def committed(game: GameProcess) -> tuple[int, bytes, dict]:
 def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -> Path:
     captured_vision = None
     vision_warning = None
+    captured_moon_vision = None
+    moon_vision_warning = None
+    captured_mask = None
+    mask_warning = None
     # Copy one committed generation while the engine cannot swap/reuse its buffers.
     with game.suspended():
         address, image, h = committed(game)
@@ -694,6 +698,17 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
                 captured_vision = ascension_vision.capture(game)
             except (OSError, RuntimeError, ValueError) as error:
                 vision_warning = str(error)
+        if h["map"] == "zombie_moon":
+            import moon_vision
+            try:
+                captured_moon_vision = moon_vision.capture(game)
+            except (OSError, RuntimeError, ValueError) as error:
+                moon_vision_warning = str(error)
+            import moon_gasmask
+            try:
+                captured_mask = moon_gasmask.capture(game)
+            except (OSError, RuntimeError, ValueError) as error:
+                mask_warning = str(error)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     if target is None:
         target = ARCHIVE / f"{h['map']}-round-{round_number:03d}-{stamp}.bo1checkpoint"
@@ -738,6 +753,14 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
         metadata["ascension_vision"] = captured_vision
     elif vision_warning:
         metadata["ascension_vision_warning"] = vision_warning
+    if captured_moon_vision is not None:
+        metadata["moon_vision"] = captured_moon_vision
+    elif moon_vision_warning:
+        metadata["moon_vision_warning"] = moon_vision_warning
+    if captured_mask is not None:
+        metadata["moon_gasmask"] = captured_mask
+    elif mask_warning:
+        metadata["moon_gasmask_warning"] = mask_warning
     pieces = {"save.bin": image, "state.bin": parts[0], "secondary.bin": parts[1]}
     metadata["sha256"] = {name: hashlib.sha256(data).hexdigest() for name, data in pieces.items()}
     temporary = target.with_suffix(".part")
@@ -1441,6 +1464,24 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                                     except (OSError, RuntimeError, ValueError) as error:
                                         if on_event:
                                             on_event("error", f"Ascension vision restore: {error}", None)
+                            if scene == 76:
+                                saved_metadata = archived_round_for_header(
+                                    reload_header["map"], reload_header["save_id"], reload_image,
+                                    include_metadata=True)
+                                if saved_metadata and saved_metadata.get("moon_vision"):
+                                    import moon_vision
+                                    try:
+                                        moon_vision.restore(game, saved_metadata["moon_vision"])
+                                    except (OSError, RuntimeError, ValueError) as error:
+                                        if on_event:
+                                            on_event("error", f"Moon vision restore: {error}", None)
+                                if saved_metadata and saved_metadata.get("moon_gasmask"):
+                                    import moon_gasmask
+                                    try:
+                                        moon_gasmask.restore(game, saved_metadata["moon_gasmask"])
+                                    except (OSError, RuntimeError, ValueError) as error:
+                                        if on_event:
+                                            on_event("error", f"Moon gas-mask restore: {error}", None)
                             moon_round_one_queued = resumed_round >= 1
                             if scene == 76 and resumed_round == 0:
                                 # The reload marker is already acknowledged below.

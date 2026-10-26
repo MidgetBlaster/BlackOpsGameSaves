@@ -26,7 +26,7 @@ PACKAGE_FILES = (
 MOD_FILES = (
     "checkpoint.py", "checkpoint_gui.py", "checkpoint_memory.py",
     "checkpoint_stats.py", "save_library.py", "game_launcher.py",
-    "fov_keeper.py", "steam_identity.py", "ascension_vision.py",
+    "fov_keeper.py", "steam_identity.py", "ascension_vision.py", "moon_gasmask.py", "moon_vision.py",
     "memory_resolver.py", "memory_signatures.json",
     "plutonium_support.py",
     "game_save_installer.py", "checkpoint.cfg", "checkpoint_speed.cfg",
