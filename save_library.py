@@ -15,6 +15,8 @@ import zipfile
 
 from checkpoint_memory import ARCHIVE
 from checkpoint_stats import extract_players
+import checkpoint_memory as core
+import steam_identity
 
 CATALOG = ARCHIVE / "catalog.json"
 KINDS = {"manual", "auto"}
@@ -41,12 +43,25 @@ def checkpoint_details(path: Path) -> dict:
             "saved_at": str(info.get("saved_at", ""))}
 
 
+def _replace_default_local_name(players: list[dict], imported: bool = False) -> list[dict]:
+    """Use the platform identity when BO1 serialized its default host name."""
+    if not players or imported:
+        return players
+    player = players[0]
+    current = str(player.get("name") or "")
+    if current.casefold().startswith("unknown soldier"):
+        replacement = steam_identity.local_player_name(core.GAME, core.CLIENT)
+        player["name"] = replacement or "Player 1"
+    return players
+
+
 def populate_player_stats(path: Path, entry: dict) -> bool:
     """Decode display details once per file; never alter the checkpoint."""
-    if entry.get("stats_version") == 2 or entry.get("error"):
+    if entry.get("stats_version") == 3 or entry.get("error"):
         return False
     try:
-        players = extract_players(path)
+        players = _replace_default_local_name(
+            extract_players(path), bool(entry.get("imported")))
     except (OSError, RuntimeError, ValueError, KeyError, IndexError,
             struct.error, zipfile.BadZipFile) as error:
         entry["stats_error"] = str(error)
@@ -56,7 +71,7 @@ def populate_player_stats(path: Path, entry: dict) -> bool:
             entry["player_count"] = len(players)
         entry.pop("stats_error", None)
         entry["stats_source"] = "archive"
-    entry["stats_version"] = 2
+    entry["stats_version"] = 3
     return True
 
 

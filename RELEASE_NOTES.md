@@ -1,3 +1,16 @@
+# Black Ops Game Saves v1.0.35
+
+- Retry a rejected checkpoint only when the engine queue is empty. This covers Shangri-La round transitions that can land inside Black Ops' three-second save-frequency guard without stacking duplicate requests.
+- Include the map and pending-request count if a checkpoint still cannot commit, making build-specific Shangri-La failures actionable.
+- Replace the local host's `Unknown Soldier` placeholder with the signed-in Steam identity or an explicit Plutonium `name` setting in both stats views and newly decoded save catalogs. Imported player names are left unchanged.
+- Existing checkpoint files and their script checksums remain compatible.
+
+# Black Ops Game Saves v1.0.34
+
+- Preserve Moon's separate pre-teleport and post-teleport vision state, alongside its independent gas-mask overlay state.
+- Show only weapons currently in each player's saved inventory rather than historical weapon-table entries.
+- Regular release; combined Steam/Plutonium installer is the sole attached asset.
+
 # Black Ops Game Saves v1.0.33
 
 - Prepare Ascension archives and weapon/power configuration before starting the map. Reuse the verified archive during restore, removing repeated file reads and decompression from the opening.
@@ -70,7 +83,7 @@
   startup injection has synthetic tests but still needs live Steam/Plutonium
   validation, so this build is published as a prerelease.
 
-# Black Ops Game Saves v1.0.28 — prerelease
+# Black Ops Game Saves v1.0.28 ï¿½ prerelease
 
 - Add Ascension power-vision reconciliation after Continue. New map-state
   checkpoints use the restored server power flag; older player-options-v2

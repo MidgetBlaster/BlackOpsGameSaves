@@ -112,3 +112,11 @@ with patch("save_library.extract_players",return_value=[{"weapons":"current load
     assert not populate_player_stats(Path("cache-test.bo1checkpoint"),entry)
     decode.assert_called_once()
 print("Legacy weapon history cache refreshes once")
+
+entry = {}
+with (patch("save_library.extract_players", return_value=[{"name": "Unknown Soldier 0"}]),
+      patch("save_library.steam_identity.local_player_name", return_value="SignedInPlayer")):
+    assert populate_player_stats(Path("identity-test.bo1checkpoint"), entry)
+assert entry["players"][0]["name"] == "SignedInPlayer"
+assert entry["stats_version"] == 3
+print("Default host names use the signed-in platform identity")

@@ -72,6 +72,14 @@ def map_title(map_name: str) -> str:
     return MAP_ART.get(map_name, (map_name.replace("_", " ").title(), None))[0]
 
 
+def display_player_name(player: dict, index: int, entry: dict) -> str:
+    name = player.get("name") or f"Player {index}"
+    if (index == 1 and not entry.get("imported") and
+            name.casefold().startswith("unknown soldier")):
+        return steam_identity.local_player_name(core.GAME, core.CLIENT) or "Player 1"
+    return name
+
+
 def recent_map_saves(saves: dict, map_name: str, category: str, limit: int = 3) -> list:
     """Return the newest saves shown beside a map on the selection page."""
     entries = [(name, entry) for name, entry in saves.items()
@@ -865,7 +873,7 @@ class CheckpointApp(tk.Tk):
                                        font=(BODY_FONT, 9))
                 for player_index, player in enumerate(players[:4]):
                     y = image_top + 29 + player_index * (42 if compact else 52)
-                    name = player.get("name") or f"Player {player_index + 1}"
+                    name = display_player_name(player, player_index + 1, selected_entry)
                     canvas.create_text(stats_x + 9, y, text=name, anchor="nw",
                                        width=stats_width - 18, fill=TEXT,
                                        font=(BODY_FONT, 9, "bold"))
@@ -1152,10 +1160,7 @@ class CheckpointApp(tk.Tk):
         for index, player in enumerate(players, 1):
             player_frame = tk.Frame(self.details, bg=PANEL, padx=10, pady=8)
             player_frame.pack(fill="x", pady=(0, 8))
-            player_name = player.get("name") or f"Player {index}"
-            if (index == 1 and not entry.get("imported") and
-                    player_name.casefold().startswith("unknown soldier")):
-                player_name = steam_identity.local_persona_name(core.GAME) or player_name
+            player_name = display_player_name(player, index, entry)
             tk.Label(player_frame, text=player_name, bg=PANEL,
                      fg=TEXT, font=(BODY_FONT, 10, "bold")).pack(anchor="w")
             def value(key):

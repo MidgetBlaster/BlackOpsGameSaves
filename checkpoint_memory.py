@@ -1163,9 +1163,38 @@ def request_fresh_checkpoint(game: GameProcess, prior_id: int, timeout: float = 
                              prior_address: int | None = None):
     # A manual devsave may already be waiting for a simulation frame. Repeated
     # F11 retries fill the engine's three-entry queue instead of helping it.
-    if not game.u32(SAVE_QUEUE_COUNT):
-        game.press_save()
-    wait_for_new_save(game, prior_id, timeout=timeout, prior_address=prior_address)
+    # A save can be rejected before it reaches the queue (most commonly the
+    # engine's three-second frequency guard). Shangri-La hits that window more
+    # often during its scripted round transition. Retry only while the queue is
+    # empty; never stack duplicate F11 requests.
+    deadline = time.monotonic() + timeout
+    last_error = None
+    first_attempt = True
+    while time.monotonic() < deadline:
+        if not game.u32(SAVE_QUEUE_COUNT):
+            game.press_save()
+        remaining = deadline - time.monotonic()
+        try:
+            attempt_timeout = min(4.0, timeout) if first_attempt else min(4.0, remaining)
+            first_attempt = False
+            wait_for_new_save(game, prior_id, timeout=attempt_timeout,
+                              prior_address=prior_address)
+            return
+        except CheckpointNotCommitted as error:
+            last_error = error
+            if timeout <= 4:
+                raise
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(min(0.35, max(0.0, deadline - time.monotonic())))
+    queue = game.u32(SAVE_QUEUE_COUNT)
+    try:
+        scene, map_name = effective_scene(game, game.u32(SCENE_ADDR))
+    except (OSError, RuntimeError):
+        scene, map_name = None, None
+    label = map_name or SCENES.get(scene, "the current map")
+    raise CheckpointNotCommitted(
+        f"{last_error or 'The checkpoint did not commit'} ({label}; pending save requests: {queue})")
 
 
 def live_round(game: GameProcess) -> int | None:

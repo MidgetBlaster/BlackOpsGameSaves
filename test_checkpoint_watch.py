@@ -303,6 +303,18 @@ with (patch.object(core, 'committed', side_effect=[RuntimeError('loading'),
     assert recovery.return_value.observe.call_count == 2
 print('Special openings, bidirectional Continue and queued manual saves passed')
 
+# A devsave rejected before entering the queue is retried after the engine's
+# frequency window without ever stacking requests.
+retry = Mock()
+retry.u32.return_value = 0
+with (patch.object(core, 'wait_for_new_save', side_effect=[
+        core.CheckpointNotCommitted('frequency guard'), None]) as wait,
+      patch.object(core.time, 'sleep')):
+    core.request_fresh_checkpoint(retry, 4, timeout=12)
+assert retry.press_save.call_count == 2
+assert wait.call_count == 2
+print('Rejected checkpoint requests retry without filling the save queue')
+
 # A player-created round-one save must not mark that round's automatic
 # boundary as completed, regardless of the selected timing policy.
 for timing in core.SAVE_TIMINGS:
