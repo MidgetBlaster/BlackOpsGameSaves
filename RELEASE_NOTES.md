@@ -1,3 +1,9 @@
+# Black Ops Game Saves v1.0.36
+
+- Apply the resolved local Steam or Plutonium player name before both a new-process launch and a same-process `devmap`, preventing the server from retaining `Unknown Soldier 0`.
+- Includes v1.0.35's Shangri-La checkpoint retry and stats-name repair.
+- Existing checkpoint files and their script checksums remain compatible.
+
 # Black Ops Game Saves v1.0.35
 
 - Retry a rejected checkpoint only when the engine queue is empty. This covers Shangri-La round transitions that can land inside Black Ops' three-second save-frequency guard without stacking duplicate requests.

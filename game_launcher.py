@@ -104,7 +104,7 @@ def launch_command(map_name: str) -> tuple[list[str], Path]:
              "+set", "fs_game", mod_game_path(),
              "+set", "scr_useFastFileOnly", "0",
              "+exec", "checkpoint.cfg"]
-    persona = steam_identity.launch_name(core.GAME)
+    persona = steam_identity.local_player_name(core.GAME, core.CLIENT)
     if persona:
         command.extend(("+set", "name", persona))
     command.extend(("+devmap", map_name))
@@ -225,7 +225,7 @@ def switch_running_map(game: core.GameProcess, map_name: str,
     compatibility_file = core.ROOT / "mods" / core.ROOT.name / "checkpoint_switch.cfg"
     compatibility_file.parent.mkdir(parents=True, exist_ok=True)
     temporary = switch_file.with_suffix(".cfg.tmp")
-    persona = steam_identity.launch_name(core.GAME)
+    persona = steam_identity.local_player_name(core.GAME, core.CLIENT)
     command = (
         f"set checkpoint_coop_pause 0\n"
         f"set scr_useFastFileOnly 0\n"
