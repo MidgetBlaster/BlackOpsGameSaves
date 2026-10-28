@@ -29,6 +29,8 @@ assert command[-2:] == ["+devmap", "zombie_cod5_factory"]
 assert command[3:6] == ["+set", "fs_game", f"mods/{core.ROOT.name}"]
 assert command[6:9] == ["+set", "scr_useFastFileOnly", "0"]
 assert command[9:11] == ["+exec", "checkpoint.cfg"]
+frontend_command, _ = game_launcher.launch_command("zombie_temple", frontend_only=True)
+assert "+devmap" not in frontend_command
 assert 'bind F10 "exec checkpoint_switch.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
 assert 'bind F4 "exec checkpoint_weapons.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
 assert 'bind F5 "exec checkpoint_speed.cfg"' in (core.ROOT / "checkpoint.cfg").read_text()
@@ -185,7 +187,9 @@ with (patch.object(core, "committed", side_effect=[RuntimeError("No save yet"),
       patch.object(game_launcher, "wait_for_focus")):
     game_launcher.make_fresh_checkpoint(fresh_game, "zombie_cod5_factory")
 assert fresh_game.commands == ["F11"]
-wait_for_save.assert_called_once_with(fresh_game, -1, timeout=3, prior_address=None)
+wait_for_save.assert_called_once_with(fresh_game, -1, timeout=3, prior_address=None,
+                                      unblocker=wait_for_save.call_args.kwargs["unblocker"])
+assert isinstance(wait_for_save.call_args.kwargs["unblocker"], core.SaveQueueUnblocker)
 
 retry_game = FreshGame()
 with (patch.object(core, "committed", side_effect=[
@@ -209,7 +213,7 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
     game_launcher.restore_and_continue(fresh_game, core.ARCHIVE / "sample.bo1checkpoint", "Solo")
 assert fresh_game.commands[-1] == "F12"
 assert restore_mock.call_args.kwargs["coop"] is True
-assert "prepared_archive" not in restore_mock.call_args.kwargs
+assert restore_mock.call_args.kwargs["prepared_archive"][0]["map"] == "zombie_cod5_factory"
 
 fresh_game.press_game_key = lambda key, description: fresh_game.commands.append((key, description))
 with (patch.object(core, "load_archive", return_value=({
@@ -366,6 +370,11 @@ class SwitchGame:
         pass
 
 
+# The online service itself is not available in these simulated map tests.
+online_gate = patch.object(game_launcher, "wait_for_online_identity")
+online_gate.start()
+
+
 switch_game = SwitchGame()
 with (patch.object(core, "game_pid", return_value=4420),
       patch.object(game_launcher, "wait_for_focus"),
@@ -402,7 +411,8 @@ assert same_map is switch_game
 switch.assert_called_once_with(switch_game, "zombie_cod5_factory", None,
                                legacy=False, enhanced=False, round_bridge=False, map_state=False)
 
-replacement_game = object()
+from types import SimpleNamespace
+replacement_game = SimpleNamespace()
 with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_factory"}, {})),
       patch.object(core, "game_pid", return_value=4420),
       patch.object(core, "GameProcess", return_value=switch_game),
@@ -583,3 +593,57 @@ with (patch.object(core,"load_archive",return_value=(metadata,{})),
     assert vision.call_count==2
     mask.assert_not_called()
 print("Moon round-zero vision loads independently of gas-mask state")
+
+online_gate.stop()
+for selected_map in core.MAP_SCENES:
+    sequence = []
+    launched = SimpleNamespace()
+    with (patch.object(core, "load_archive", return_value=({"map": selected_map}, {})),
+          patch.object(core, "game_pid", return_value=None),
+          patch.object(game_launcher, "prepare_script_variant"),
+          patch.object(game_launcher, "prepare_restore_options", side_effect=lambda *a: sequence.append("prepare")),
+          patch.object(game_launcher, "launch_command", return_value=(["launcher"], Path("."))) as command,
+          patch.object(game_launcher.subprocess, "Popen", side_effect=lambda *a, **kw: sequence.append("launch")),
+          patch.object(game_launcher, "wait_for_game", return_value=launched),
+          patch.object(game_launcher, "wait_for_online_identity", side_effect=lambda *a: sequence.append("online")),
+          patch.object(game_launcher, "wait_for_map_ready", side_effect=lambda *a, **kw: sequence.append("ready")),
+          patch.object(game_launcher, "switch_running_map", side_effect=AssertionError("Map already launched"))):
+        result, _ = game_launcher.start_selected_game(Path("test.bo1checkpoint"), "Solo")
+    assert sequence == ["prepare", "launch", "ready"], selected_map
+    assert result._ascension_restore[1]["map"] == selected_map
+    command.assert_called_once_with(selected_map)
+print("Every map prepares before direct launch without visiting the frontend")
+
+for saved_round in (1, 12):
+    temple = FreshGame()
+    with (patch.object(core, "load_archive", return_value=({"map":"zombie_temple", "round":saved_round}, {})),
+          patch.object(game_launcher, "prepare_restore_options", return_value=False),
+          patch.object(game_launcher, "make_fresh_checkpoint") as bootstrap,
+          patch.object(core, "restore") as restore,
+          patch.object(core, "live_round", return_value=None),
+          patch.object(game_launcher, "wait_for_focus"),
+          patch.object(game_launcher, "wait_for_map_ready") as ready,
+          patch.object(game_launcher, "wait_for_loaded_round", side_effect=[False, True])):
+        game_launcher.restore_and_continue(temple, Path("temple.bo1checkpoint"), "Solo")
+    assert temple.commands == ["F12", "F12"]
+    bootstrap.assert_called_once()
+    restore.assert_called_once()
+    ready.assert_called_once_with(temple, "zombie_temple", None,
+                                  during_opening=False, allow_stale_checkpoint=True)
+print("Shangri-La retries Continue when playable, including round-one saves")
+
+with patch.object(game_launcher.steam_identity, "local_player_name", return_value="Steam Player"):
+    direct, _ = game_launcher.launch_command("zombie_temple")
+assert direct[-5:] == ["+set", "name", "Steam Player", "+devmap", "zombie_temple"]
+
+with (patch.object(core, "game_pid", return_value=None),
+      patch.object(game_launcher, "prepare_script_variant"),
+      patch.object(game_launcher, "launch_command", return_value=(["launcher"], Path("."))) as command,
+      patch.object(game_launcher.subprocess, "Popen"),
+      patch.object(game_launcher, "wait_for_game", return_value=fresh_game),
+      patch.object(game_launcher, "wait_for_map_ready"),
+      patch.object(game_launcher, "wait_for_online_identity", side_effect=AssertionError("No menu gate")),
+      patch.object(game_launcher, "switch_running_map", side_effect=AssertionError("Already launched"))):
+    assert game_launcher.start_new_game("zombie_temple") is fresh_game
+command.assert_called_once_with("zombie_temple")
+print("New Game launches directly with the Steam persona before devmap")

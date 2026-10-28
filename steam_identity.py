@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import struct
 from functools import lru_cache
 
 
@@ -113,11 +114,51 @@ def plutonium_player_name() -> str | None:
 
 def local_player_name(game: Path, client: str = "steam") -> str | None:
     if client == "plutonium":
-        name = plutonium_player_name()
-        if name:
-            return name
+        # Never replace a signed-in Plutonium identity with a Steam account.
+        return plutonium_player_name()
     return safe_player_name(local_persona_name(game))
 
 
 def launch_name(game: Path) -> str | None:
     return safe_player_name(local_persona_name(game))
+
+
+def online_name(game) -> str | None:
+    """Read Steam frontend readiness indicators; never change online dvars."""
+    import checkpoint_memory as core
+    def string(pointer):
+        if not 0x10000 <= pointer < 0x7fff0000:
+            return b""
+        return game.read(pointer, 64).split(b"\0", 1)[0]
+
+    addresses = getattr(game, "_identity_dvars", None)
+    if addresses is None:
+        anchor = game.u32(core.BASE + 0x2bf6888 + core.DATA_DELTA)
+        if string(game.u32(anchor)) != b"cg_fov":
+            raise RuntimeError("Cannot read this client's online sign-in indicators")
+        addresses = {}
+        wanted = {b"name": 7, b"onlinegame": 0, b"live_service": 0}
+        for index in range(-4095, 4096):
+            address = anchor + index * 0x70
+            try:
+                data = game.read(address, 0x28)
+                key = string(struct.unpack_from("<I", data)[0])
+                kind = struct.unpack_from("<I", data, 0x10)[0]
+                if key in wanted and kind == wanted[key]:
+                    if key in addresses:
+                        raise RuntimeError("Ambiguous online sign-in indicators")
+                    addresses[key] = address
+            except OSError:
+                continue
+        if len(addresses) != 3:
+            raise RuntimeError("Online sign-in indicators are not initialized")
+        game._identity_dvars = addresses
+    for key, address in addresses.items():
+        if string(game.u32(address)) != key:
+            game._identity_dvars = None
+            return None
+    # Boolean dvars occupy one byte; adjacent bytes need not be zero.
+    if not all(game.read(addresses[key] + 0x18, 1) == b"\x01"
+               for key in (b"onlinegame", b"live_service")):
+        return None
+    return safe_player_name(string(game.u32(addresses[b"name"] + 0x18)).decode("utf-8", "replace"))

@@ -1103,7 +1103,9 @@ class SaveQueueUnblocker:
         if not expected_requests():
             self.signature = self.since = self.first_frame = None
             return False
-        signature = (pointer, state, ids)
+        # New F11 requests appended behind a stalled request must not restart
+        # its recovery grace period. Only movement of the head is progress.
+        signature = (pointer, state, ids[0])
         if signature != self.signature:
             self.signature, self.since = signature, now
             self.first_frame = game.u32(LEVEL_FRAME_ADDR)
@@ -1138,9 +1140,9 @@ class SaveQueueUnblocker:
 
 
 def wait_for_new_save(game: GameProcess, prior_id: int, timeout: float = 12,
-                      prior_address: int | None = None):
+                      prior_address: int | None = None, unblocker=None):
     deadline = time.monotonic() + timeout
-    unblocker = SaveQueueUnblocker()
+    unblocker = unblocker if unblocker is not None else SaveQueueUnblocker()
     while time.monotonic() < deadline:
         try:
             # Continue and the first save can temporarily invalidate committed().
@@ -1170,6 +1172,9 @@ def request_fresh_checkpoint(game: GameProcess, prior_id: int, timeout: float = 
     deadline = time.monotonic() + timeout
     last_error = None
     first_attempt = True
+    # The committed-buffer recovery grace is eight seconds. Keep it alive
+    # across four-second retry windows, or it can never expire.
+    unblocker = SaveQueueUnblocker()
     while time.monotonic() < deadline:
         if not game.u32(SAVE_QUEUE_COUNT):
             game.press_save()
@@ -1178,7 +1183,7 @@ def request_fresh_checkpoint(game: GameProcess, prior_id: int, timeout: float = 
             attempt_timeout = min(4.0, timeout) if first_attempt else min(4.0, remaining)
             first_attempt = False
             wait_for_new_save(game, prior_id, timeout=attempt_timeout,
-                              prior_address=prior_address)
+                              prior_address=prior_address, unblocker=unblocker)
             return
         except CheckpointNotCommitted as error:
             last_error = error
@@ -1634,7 +1639,9 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                     if round_number:
                         auto_requests.setdefault(completed_round, round_number)
                     round_number = None
-                    if auto_requests and not reload_pending and opening_ready and now >= next_auto_attempt:
+                    auto_round_ready = scene != 44 or current_round >= 2
+                    if (auto_requests and not reload_pending and opening_ready and
+                            auto_round_ready and now >= next_auto_attempt):
                         completed_round = next(iter(auto_requests))
                         round_number = auto_requests[completed_round]
                         if game.foreground() or game.activate_window():
@@ -1663,7 +1670,7 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                                 end_tracker.defer(time.monotonic())
                             else:
                                 tracker.pending = (round_number, time.monotonic() + 1)
-                    if (enable_recovery and observed_round is not None and menu == 0 and game.foreground()
+                    if (enable_recovery and auto_round_ready and observed_round is not None and menu == 0 and game.foreground()
                             and time.monotonic() >= next_recovery):
                         next_recovery = time.monotonic() + RECOVERY_INTERVAL
                         with save_lock if save_lock is not None else nullcontext():

@@ -41,7 +41,7 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
              manual_continue=False, save_timing="End of Rounds",
              initial_round=4, transition_byte=1, advance_after_manual=False,
              manual_failure=False, auto_failures=0, scene=204,
-             resume_archive_round=2, reload_ticks=(2,), first_round_tick=None, restart=False, lose_round_after_manual=False, rounds=None):
+             resume_archive_round=2, reload_ticks=(2,), first_round_tick=None, restart=False, lose_round_after_manual=False, rounds=None, magic_edges=None):
     game = FakeGame()
     game.round = initial_round
     clock = [0.0]
@@ -91,6 +91,8 @@ def exercise(player_f11, skip_initial_round=None, manual_tick=1,
                 game.magic = 2000
             if magic_transition and self.ticks == 3:
                 game.magic = 500
+            if magic_edges and self.ticks in magic_edges:
+                game.magic = magic_edges[self.ticks]
 
     attempts = [0]
     def save(_game, number):
@@ -401,3 +403,34 @@ for timing in core.SAVE_TIMINGS:
     assert captures(events) == [("manual",1),("saved",2),("manual",2),
                                 ("saved",3),("manual",3),("saved",4)], captures(events)
 print("Three consecutive rounds autosave with manual saves between every boundary")
+
+# Shangri-La allows F11 during round one, but holds its automatic boundary
+# until round two. Manual capture must not remove that pending boundary.
+assert captures(exercise(True, scene=44, initial_round=1, advance_round=False,
+                         round_end_tick=3)) == [("manual", 1)]
+temple = captures(exercise(True, scene=44, initial_round=1, advance_round=False,
+                          round_end_tick=2, rounds={5: 2, 10: 3}))
+assert temple[0] == ("manual", 1)
+assert any(kind == "saved" for kind, _ in temple[1:])
+print("Shangri-La suppresses round-one autosaves and preserves manual saves")
+
+# Repeated manual commits at high rounds cannot consume automatic boundaries.
+# Cover the missing-HUD fallback as well as the normal round counter.
+for baseline in (63, 127, 255, 999):
+    for timing in core.SAVE_TIMINGS:
+        events = exercise(True, initial_round=baseline, advance_round=False,
+                          manual_tick=(1, 2, 6, 7, 11, 12),
+                          rounds={3: baseline+1, 8: baseline+2, 13: baseline+3},
+                          save_timing=timing)
+        assert [n for kind, n in captures(events) if kind == "saved"] == [
+            baseline+1, baseline+2, baseline+3], captures(events)
+        assert len([e for e in captures(events) if e[0] == "manual"]) == 6
+        events = exercise(True, initial_round=baseline, advance_round=False,
+                          manual_tick=(1, 2, 6, 7, 11, 12), rounds={},
+                          lose_round_after_manual=True,
+                          magic_edges={3:2000, 4:500, 8:2000, 9:500, 13:2000, 14:500},
+                          save_timing=timing)
+        offset = 1 if timing == "Start of Round" else 0
+        assert [n for kind, n in captures(events) if kind == "saved"] == [
+            baseline+offset, baseline+1+offset, baseline+2+offset], captures(events)
+print("Repeated high-round manual saves preserve every automatic round boundary")

@@ -1,3 +1,13 @@
+# Black Ops Game Saves v1.0.37
+
+- Keep stalled manual-save queue recovery alive across autosave retry windows and additional F11 requests. Previously four-second retries could repeatedly reset an eight-second recovery timer.
+- Cover repeated manual commits between three successive autosaves at rounds 63, 127, 255 and 999, with both normal counters and missing-counter fallback, for every autosave timing setting.
+- Prepare archives and restore options before launching every map, then use the common early save-buffer readiness path for Continue. This does not directly read the `initial_blackscreen_pass` script flag.
+- Steam now launches directly into the selected map, passing the locally recorded Steam persona before devmap. New Game and Continue no longer require navigating Zombies menus.
+- Check Continue's brief read state more frequently. Shangri-La retries an unconfirmed Continue when playable, including round-one checkpoints, without creating another bootstrap save.
+- Preserve Plutonium's own identity instead of substituting a Steam account when its name cannot be read.
+- Shangri-La manual saves remain available during round one. Automatic checkpoints and recovery captures wait until round two; pending round boundaries remain queued.
+
 # Black Ops Game Saves v1.0.36
 
 - Apply the resolved local Steam or Plutonium player name before both a new-process launch and a same-process `devmap`, preventing the server from retaining `Unknown Soldier 0`.

@@ -86,7 +86,7 @@ class GameProcessReplaced(RuntimeError):
     """The loader's first BlackOps.exe process gave way to another one."""
 
 
-def launch_command(map_name: str) -> tuple[list[str], Path]:
+def launch_command(map_name: str, *, frontend_only: bool = False) -> tuple[list[str], Path]:
     if not re.fullmatch(r"[A-Za-z0-9_]+", map_name):
         raise ValueError("The save has an invalid map name")
     if core.CLIENT == "plutonium":
@@ -105,10 +105,30 @@ def launch_command(map_name: str) -> tuple[list[str], Path]:
              "+set", "scr_useFastFileOnly", "0",
              "+exec", "checkpoint.cfg"]
     persona = steam_identity.local_player_name(core.GAME, core.CLIENT)
-    if persona:
+    if persona and not frontend_only:
         command.extend(("+set", "name", persona))
-    command.extend(("+devmap", map_name))
+    if not frontend_only:
+        command.extend(("+devmap", map_name))
     return command, folder
+
+
+def wait_for_online_identity(game, cancel=None, report=None):
+    if core.CLIENT != "steam":
+        return
+    if report:
+        report("Open Zombies and connect to online services. The selected map will start when your name is registered.")
+    while True:
+        _check_cancel(cancel)
+        if core.game_pid() != game.pid:
+            raise GameProcessReplaced("Black Ops restarted while connecting to online services")
+        try:
+            name = steam_identity.online_name(game)
+            if name:
+                game._online_player_name = name
+                return
+        except (OSError, RuntimeError):
+            pass
+        time.sleep(0.5)
 
 
 def _check_cancel(cancel: threading.Event | None):
@@ -225,7 +245,7 @@ def switch_running_map(game: core.GameProcess, map_name: str,
     compatibility_file = core.ROOT / "mods" / core.ROOT.name / "checkpoint_switch.cfg"
     compatibility_file.parent.mkdir(parents=True, exist_ok=True)
     temporary = switch_file.with_suffix(".cfg.tmp")
-    persona = steam_identity.local_player_name(core.GAME, core.CLIENT)
+    persona = getattr(game, "_online_player_name", None) or steam_identity.local_player_name(core.GAME, core.CLIENT)
     command = (
         f"set checkpoint_coop_pause 0\n"
         f"set scr_useFastFileOnly 0\n"
@@ -390,10 +410,7 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
     _check_cancel(cancel)
     # Suspend the live server for either mode. The solo pause menu intercepts
     # console and bound keys, preventing the final continue command.
-    if metadata["map"] in ("zombie_cosmodrome", "zombie_moon"):
-        core.restore(game, save_path, coop=True, prepared_archive=(metadata, pieces))
-    else:
-        core.restore(game, save_path, coop=True)
+    core.restore(game, save_path, coop=True, prepared_archive=(metadata, pieces))
     wait_for_focus(game, cancel)
     before_continue = (game.u32(core.LEVEL_FRAME_ADDR), game.u32(core.LEVEL_TIME_ADDR))
     if power_config:
@@ -424,11 +441,12 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
                                     current_round in (None, 1))
         except OSError:
             still_at_first_round = False
-        if still_at_first_round:
+        if still_at_first_round or metadata["map"] == "zombie_temple":
             # Ascension and other maps can accept the fresh F11 checkpoint
             # before the script VM is ready to process the first F12.
             wait_for_map_ready(game, metadata["map"], cancel,
-                               during_opening=True, allow_stale_checkpoint=True)
+                               during_opening=metadata["map"] != "zombie_temple",
+                               allow_stale_checkpoint=True)
             wait_for_focus(game, cancel)
             before_continue = (game.u32(core.LEVEL_FRAME_ADDR),
                                game.u32(core.LEVEL_TIME_ADDR))
@@ -577,7 +595,9 @@ def wait_for_loaded_round(game: core.GameProcess, saved_round: int | None,
             if isinstance(error, PermissionError) or error.errno not in (299, 487, 998):
                 raise
             stable = 0
-        time.sleep(0.01 if on_resume is not None and not overlay_applied else 0.25)
+        # Early/round-one saves can resume near the same level clock. Observe
+        # the brief READING state even when no visual overlay needs restoring.
+        time.sleep(0.01 if not load_started or (on_resume is not None and not overlay_applied) else 0.25)
     return False
 
 
@@ -585,10 +605,10 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
                         report=None) -> tuple[core.GameProcess, dict]:
     metadata, pieces = core.load_archive(save_path)
     core.validate_client_script(metadata)
-    prepared = None
-    if metadata["map"] in ("zombie_cosmodrome", "zombie_moon"):
-        prepared = (Path(save_path).resolve(), metadata, pieces,
-                    prepare_restore_options(save_path, metadata))
+    # Every map uses the same early Continue path. Decode the archive and
+    # prepare options before devmap, outside the opening-screen window.
+    prepared = (Path(save_path).resolve(), metadata, pieces,
+                prepare_restore_options(save_path, metadata))
     def ready_result(game):
         if prepared is not None:
             game._ascension_restore = prepared
@@ -632,21 +652,15 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
         report(f"Starting {metadata['map']} with game_mod.dll and the Game Save mod...")
     subprocess.Popen(command, cwd=folder)
     game = wait_for_game(cancel, write=True, suspend=True)
-    deadline = time.monotonic() + 180
     while True:
         try:
-            if report:
-                report("Waiting for the map's save system..." + opening_hint)
-            wait_for_map_ready(game, metadata["map"], cancel,
-                               timeout=max(0, deadline - time.monotonic()),
-                               during_opening=True)
+            wait_for_map_ready(game, metadata["map"], cancel, during_opening=True)
             return ready_result(game)
         except GameProcessReplaced:
             game.close()
             if report:
                 report("Black Ops switched processes during startup. Reconnecting to the game...")
             game = wait_for_game(cancel, write=True, suspend=True)
-            deadline = time.monotonic() + 180
         except BaseException:
             game.close()
             raise
