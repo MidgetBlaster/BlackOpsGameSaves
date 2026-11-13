@@ -20,6 +20,13 @@ with TemporaryDirectory() as temp:
     client.write_bytes((variants / 'zombie_cosmodrome_v1.csc').read_bytes())
     with (patch.object(core,'ROOT',root),patch.object(launch,'SCRIPT_SOURCE',main),
           patch.object(launch,'OPTIONS_SCRIPT',options),patch.object(launch,'SCRIPT_VARIANTS',variants)):
+        launch.prepare_script_variant(legacy=False,enhanced=True,round_bridge=True,map_state=True,in_game_pause=True)
+        assert options.read_bytes()==(variants/'_checkpoint_coop_pause_v5.gsc').read_bytes()
+        assert launch.in_game_pause_scripts({'script_variant':'map_state_v2'})
+        assert launch.map_state_scripts({'script_variant':'map_state_v2'})
+        assert launch.enhanced_scripts({'script_variant':'map_state_v2'})
+        assert launch.round_bridge_scripts({'script_variant':'map_state_v2'})
+        assert not launch.in_game_pause_scripts({'script_variant':'map_state_v1'})
         launch.prepare_script_variant(legacy=False,enhanced=True,round_bridge=True,map_state=True)
         assert options.read_bytes()==(variants/'_checkpoint_coop_pause_v4.gsc').read_bytes()
         assert client.read_bytes()==(variants/'zombie_cosmodrome_v1.csc').read_bytes()

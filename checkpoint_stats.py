@@ -96,7 +96,10 @@ def _game_segments(path: Path) -> tuple[bytes, bytes, bytes]:
     with zipfile.ZipFile(path) as archive:
         manifest = json.loads(archive.read("manifest.json"))
         data = archive.read("state.bin")
-    body_size = manifest["body_size"]
+    return _payload_segments(data, manifest["body_size"])
+
+
+def _payload_segments(data: bytes, body_size: int) -> tuple[bytes, bytes, bytes]:
     if not isinstance(body_size, int) or not 0 < body_size <= len(data):
         raise ValueError("Invalid checkpoint body size")
     offset = 0
@@ -156,24 +159,66 @@ def _weapon_label(name: str) -> str:
 
 def extract_players(path: Path) -> list[dict]:
     """Return saved players, leaving uncertain data unset rather than guessing."""
-    weapon_data, globals_data, state = _game_segments(path)
+    return players_from_segments(*_game_segments(path))
+
+
+def extract_players_from_payload(data: bytes, body_size: int) -> list[dict]:
+    """Read players from a live checkpoint's game-state buffer."""
+    return players_from_segments(*_payload_segments(data, body_size))
+
+
+_PRINTABLE = frozenset(range(0x20, 0x7F))
+
+
+def _name_candidates(state: bytes):
+    """Yield (offset, name) for 32-byte name fields repeated 152 bytes later.
+
+    Names can be short or contain UTF-8 bytes (common for Steam personas), and
+    the byte before the field can be a non-zero byte of an unrelated field, so
+    try every start inside each non-NUL run that ends at a NUL.
+    """
+    for run in re.finditer(rb"[^\0]+", state):
+        end = run.end()
+        if end + 152 >= len(state) or state[end + 152] != 0:
+            continue  # the second copy must end at the same relative NUL
+        for start in range(max(run.start(), end - 31), end):
+            name = state[start:end]
+            if state[start + 152:end + 152] == name:
+                yield start, name
+
+
+def players_from_segments(weapon_data: bytes, globals_data: bytes, state: bytes) -> list[dict]:
     names = _weapon_names(weapon_data)
     if len(globals_data) < 268:
         raise ValueError("Missing saved player weapon masks")
     players = {}
+    ranks = {}
     # Two 32-byte player-name copies in each SP gclient image are 152 bytes
     # apart. The first is at +0x1AA0; score and scoreboard fields follow.
-    for match in re.finditer(rb"(?<![ -~])[ -~]{3,31}\x00", state):
-        name_bytes = match.group()[:-1]
-        position = match.start()
-        second = position + 152
-        if state[second:second + len(name_bytes) + 1] != name_bytes + b"\0":
-            continue
+    # G_SaveState writes each client's slot number just before its image.
+    for position, name_bytes in _name_candidates(state):
         base = position - 0x1AA0
         if base < 4 or base + 0x1D28 > len(state):
             continue
         client = state[base + 0x130]
         if client >= 4:
+            continue
+        try:
+            text = name_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if not text.isprintable() or not text.strip():
+            continue
+        if state[position - 1] in _PRINTABLE:
+            continue  # a tail of a longer string, not the start of a name field
+        indexed = struct.unpack_from("<I", state, base - 4)[0] == client
+        legacy_match = len(name_bytes) >= 3 and all(b in _PRINTABLE for b in name_bytes)
+        if not (indexed or legacy_match):
+            continue
+        # Zero-filled memory can mimic the slot prefix. Rank candidates so a
+        # real record (prefix, then a plain readable name, then length) wins.
+        rank = (indexed and legacy_match, legacy_match, indexed, len(name_bytes))
+        if client in ranks and ranks[client] > rank:
             continue
         points, kills = struct.unpack_from("<ii", state, base + 0x1B88)
         downs, revives = struct.unpack_from("<ii", state, base + 0x1BA4)
@@ -194,10 +239,11 @@ def extract_players(path: Path) -> list[dict]:
         held.sort(key=lambda index: (index != active, index))
         loadout = ", ".join(_weapon_label(names[index]) +
                             (" (equipped)" if index == active else "") for index in held)
-        player = {"name": name_bytes.decode("ascii", "replace"),
+        player = {"name": text,
                   "points": points, "weapons": loadout,
                   "client_slot": client,
                   "equipped_weapon_raw": names[active] if active else "",
                   "revives": revives, "downs": downs, "kills": kills}
         players[client] = player
+        ranks[client] = rank
     return [players[index] for index in sorted(players)]

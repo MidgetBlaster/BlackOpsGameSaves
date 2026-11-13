@@ -30,15 +30,24 @@ def legacy_scripts(metadata: dict) -> bool:
 
 
 def enhanced_scripts(metadata: dict) -> bool:
-    return metadata.get("script_variant") in ("player_options_v1", "player_options_v2", "map_state_v1")
+    return metadata.get("script_variant") in ("player_options_v1", "player_options_v2") or map_state_scripts(metadata)
 
 
 def round_bridge_scripts(metadata: dict) -> bool:
-    return metadata.get("script_variant") in ("player_options_v2", "map_state_v1")
+    return metadata.get("script_variant") == "player_options_v2" or map_state_scripts(metadata)
+
+
+def map_state_scripts(metadata: dict) -> bool:
+    return metadata.get("script_variant") in ("map_state_v1", "map_state_v2")
+
+
+def in_game_pause_scripts(metadata: dict) -> bool:
+    return metadata.get("script_variant") == "map_state_v2"
 
 
 def prepare_script_variant(*, legacy: bool, enhanced: bool = False,
-                           round_bridge: bool = False, map_state: bool = False):
+                           round_bridge: bool = False, map_state: bool = False,
+                           in_game_pause: bool = False):
     """Select the matching raw script before the next map loads."""
     old = (SCRIPT_VARIANTS / "_zombiemode_legacy.gsc").read_bytes()
     new = (SCRIPT_VARIANTS / "_zombiemode_pause.gsc").read_bytes()
@@ -51,10 +60,13 @@ def prepare_script_variant(*, legacy: bool, enhanced: bool = False,
     bridge_options = (SCRIPT_VARIANTS / "_checkpoint_coop_pause_v3.gsc").read_bytes()
     state_path = SCRIPT_VARIANTS / "_checkpoint_coop_pause_v4.gsc"
     state_options = state_path.read_bytes() if state_path.is_file() else bridge_options
+    pause_path = SCRIPT_VARIANTS / "_checkpoint_coop_pause_v5.gsc"
+    pause_options = pause_path.read_bytes() if pause_path.is_file() else state_options
     current_options = OPTIONS_SCRIPT.read_bytes()
-    if current_options not in (old_options, new_options, bridge_options, state_options):
+    if current_options not in (old_options, new_options, bridge_options, state_options, pause_options):
         raise RuntimeError("The player options script was edited outside the save manager. Check it before loading a checkpoint.")
-    wanted_options = (state_options if map_state and not legacy else
+    wanted_options = (pause_options if map_state and in_game_pause and not legacy else
+                      state_options if map_state and not legacy else
                       bridge_options if round_bridge and not legacy else
                       new_options if enhanced and not legacy else old_options)
     for path, current_data, wanted_data in ((SCRIPT_SOURCE, current, wanted),
@@ -235,12 +247,14 @@ def wait_for_map_ready(game: core.GameProcess, map_name: str,
 
 def switch_running_map(game: core.GameProcess, map_name: str,
                        cancel: threading.Event | None = None, *, legacy: bool = False,
-                       enhanced: bool = False, round_bridge: bool = False, map_state: bool = False):
+                       enhanced: bool = False, round_bridge: bool = False, map_state: bool = False,
+                       in_game_pause: bool = False):
     """Run devmap through a prebound F10 without opening the game console."""
     if not re.fullmatch(r"[A-Za-z0-9_]+", map_name):
         raise ValueError("The save has an invalid map name")
     prepare_script_variant(legacy=legacy, enhanced=enhanced,
-                           round_bridge=round_bridge, map_state=map_state)
+                           round_bridge=round_bridge, map_state=map_state,
+                           in_game_pause=in_game_pause)
     switch_file = core.ROOT / "checkpoint_switch.cfg"
     compatibility_file = core.ROOT / "mods" / core.ROOT.name / "checkpoint_switch.cfg"
     compatibility_file.parent.mkdir(parents=True, exist_ok=True)
@@ -380,7 +394,7 @@ def make_fresh_checkpoint(game: core.GameProcess, map_name: str,
 def prepare_restore_options(save_path, metadata):
     if round_bridge_scripts(metadata):
         power_restore_config(bool(metadata.get("power_on")),
-                             map_state=metadata.get("script_variant") == "map_state_v1")
+                             map_state=map_state_scripts(metadata))
     weapon_config = None
     if enhanced_scripts(metadata):
         try:
@@ -408,9 +422,27 @@ def restore_and_continue(game: core.GameProcess, save_path: Path, mode: str,
     if mode not in ("Solo", "Co-op"):
         raise ValueError("Choose Solo or Co-op for this save before starting it")
     _check_cancel(cancel)
-    # Suspend the live server for either mode. The solo pause menu intercepts
-    # console and bound keys, preventing the final continue command.
-    core.restore(game, save_path, coop=True, prepared_archive=(metadata, pieces))
+    # The client writes the fresh checkpoint's client-script payload a few
+    # frames after the server commits it. Restoring before that lets the late
+    # write land on the restored checkpoint (seen repeatedly on Shangri-La).
+    deadline = time.monotonic() + 15
+    while True:
+        _check_cancel(cancel)
+        core.wait_for_client_state(game, timeout=max(0.1, min(5.0, deadline - time.monotonic())))
+        try:
+            # Suspend the live server for either mode. The solo pause menu intercepts
+            # console and bound keys, preventing the final continue command.
+            core.restore(game, save_path, coop=True, prepared_archive=(metadata, pieces))
+            break
+        except core.ClientStatePending:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "Black Ops did not finish writing the fresh checkpoint's client state, so the "
+                    "saved game was not loaded. The save is unchanged; retry Continue.") from None
+    if metadata.get("secondary_size", 1) == 0:
+        metadata["resume_warning"] = (
+            "This checkpoint was captured before Black Ops wrote its client-side state. "
+            "Map effects may not match the save; make a new save after loading.")
     wait_for_focus(game, cancel)
     before_continue = (game.u32(core.LEVEL_FRAME_ADDR), game.u32(core.LEVEL_TIME_ADDR))
     if power_config:
@@ -616,7 +648,8 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
     use_legacy = legacy_scripts(metadata)
     use_enhanced = enhanced_scripts(metadata)
     use_round_bridge = round_bridge_scripts(metadata)
-    use_map_state = metadata.get("script_variant") == "map_state_v1"
+    use_map_state = map_state_scripts(metadata)
+    use_in_game_pause = in_game_pause_scripts(metadata)
     opening_hint = " Restoring as soon as the map's save buffers initialize."
     running_pid = core.game_pid()
     if running_pid:
@@ -628,7 +661,8 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
             # into an active server bypasses the opening state that BO1's
             # loadgame_continue expects and can leave a live session broken.
             switch_running_map(game, metadata["map"], cancel, legacy=use_legacy,
-                               enhanced=use_enhanced, round_bridge=use_round_bridge, map_state=use_map_state)
+                               enhanced=use_enhanced, round_bridge=use_round_bridge, map_state=use_map_state,
+                               in_game_pause=use_in_game_pause)
             return ready_result(game)
         except GameProcessReplaced:
             game.close()
@@ -646,7 +680,8 @@ def start_selected_game(save_path: Path, mode: str, cancel: threading.Event | No
             game.close()
             raise
     prepare_script_variant(legacy=use_legacy, enhanced=use_enhanced,
-                           round_bridge=use_round_bridge, map_state=use_map_state)
+                           round_bridge=use_round_bridge, map_state=use_map_state,
+                           in_game_pause=use_in_game_pause)
     command, folder = launch_command(metadata["map"])
     if report:
         report(f"Starting {metadata['map']} with game_mod.dll and the Game Save mod...")
@@ -678,7 +713,7 @@ def start_new_game(map_name: str, cancel: threading.Event | None = None,
         game = core.GameProcess(running_pid, write=True, suspend=True)
         try:
             switch_running_map(game, map_name, cancel, legacy=False, enhanced=True,
-                               round_bridge=True, map_state=True)
+                               round_bridge=True, map_state=True, in_game_pause=True)
             wait_for_map_ready(game, map_name, cancel, during_opening=core.MAP_SCENES.get(map_name) == 76,
                                allow_stale_checkpoint=True)
             return game
@@ -695,7 +730,8 @@ def start_new_game(map_name: str, cancel: threading.Event | None = None,
         except BaseException:
             game.close()
             raise
-    prepare_script_variant(legacy=False, enhanced=True, round_bridge=True, map_state=True)
+    prepare_script_variant(legacy=False, enhanced=True, round_bridge=True, map_state=True,
+                           in_game_pause=True)
     command, folder = launch_command(map_name)
     if report:
         report(f"Starting a new {map_name} game with the Game Save mod...")

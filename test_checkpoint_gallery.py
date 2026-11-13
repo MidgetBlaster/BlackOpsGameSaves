@@ -349,3 +349,13 @@ if __name__ == "__main__":
     test_speed_fix_remembers_off()
     test_delete_map_saves_updates_recent_rows()
     print("Mission-select layout and recent saves passed")
+
+# The co-op pause reports which players the latest checkpoint contains.
+from checkpoint_gui import coop_players_message
+assert coop_players_message([{"name": "Cyrus"}, {"name": "Jo"}]) == \
+    "2 players in the latest checkpoint: Cyrus, Jo. The pause works from the host's Game Save App."
+assert coop_players_message([{"name": "Cyrus"}]).startswith("Only Cyrus was found")
+assert "host's Game Save App" in coop_players_message([])
+assert coop_players_message([]).startswith("No players were found")
+assert "Could not read" in coop_players_message(None)
+print("Co-op pause player messages passed")

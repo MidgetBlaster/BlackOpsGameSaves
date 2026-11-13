@@ -80,6 +80,20 @@ def display_player_name(player: dict, index: int, entry: dict) -> str:
     return name
 
 
+def coop_players_message(players: list[dict] | None) -> str:
+    """Explain which players the pause request can see in the latest checkpoint."""
+    if players is None:
+        return ("Could not read the players from the latest checkpoint. "
+                "The pause still engages in game; it works from the host's Game Save App.")
+    names = [str(player.get("name") or f"Player {index}") for index, player in enumerate(players, 1)]
+    hint = " The pause works from the host's Game Save App."
+    if len(names) >= 2:
+        return f"{len(names)} players in the latest checkpoint: {', '.join(names)}.{hint}"
+    found = f"Only {names[0]} was found" if names else "No players were found"
+    return (f"{found} in the latest checkpoint. Press F11 once everyone has joined so a "
+            f"checkpoint includes them.{hint}")
+
+
 def recent_map_saves(saves: dict, map_name: str, category: str, limit: int = 3) -> list:
     """Return the newest saves shown beside a map on the selection page."""
     entries = [(name, entry) for name, entry in saves.items()
@@ -200,7 +214,8 @@ class CheckpointApp(tk.Tk):
         if core.game_pid() is None:
             try:
                 game_launcher.prepare_script_variant(legacy=False, enhanced=True,
-                                                     round_bridge=True, map_state=True)
+                                                     round_bridge=True, map_state=True,
+                                                     in_game_pause=True)
             except (OSError, RuntimeError) as error:
                 self.status.set(f"Could not prepare the pause script: {error}")
         self.save_policy = tk.StringVar(value=self.library.data.get("save_policy", "Keep new saves"))
@@ -1397,13 +1412,17 @@ class CheckpointApp(tk.Tk):
             try:
                 if core.live_round(game) is None:
                     raise RuntimeError("Wait until the Co-op map is playable before pausing.")
+                try:
+                    players = core.checkpoint_players(game)
+                except (OSError, RuntimeError, ValueError, KeyError):
+                    players = None
                 game_launcher.wait_for_focus(game)
                 game.press_coop_pause()
             finally:
                 game.close()
             self.coop_paused = True
             self.coop_pause_pid = pid
-            self.events.put(("coop_pause_changed", True, pid))
+            self.events.put(("coop_pause_changed", True, pid, coop_players_message(players)))
 
         self._start_worker(work)
 
@@ -1642,7 +1661,9 @@ class CheckpointApp(tk.Tk):
                     if self.start_cancel is None:
                         self._set_busy(False)
                     self.pause_button.configure(text="Resume co-op" if event[1] else "Pause co-op")
-                    self.status.set("Co-op pause requested. It engages with two or more players; confirm in game."
+                    detail = event[3] if len(event) > 3 and event[3] else ""
+                    self.status.set((f"Co-op pause requested. {detail}" if detail else
+                                     "Co-op pause requested. It engages with two or more players; confirm in game.")
                                     if event[1] else "Co-op resume requested. Saving continues automatically.")
                     if not event[1]:
                         self._start_watch()

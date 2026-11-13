@@ -99,6 +99,7 @@ class FakeGame:
         image[h+0x20:h+0x20+len(b'nazi_zombie_kino')] = b'nazi_zombie_kino'
         image[h+0x3e0:h+0x3e0+len(b'save\\kino-1.svg')] = b'save\\kino-1.svg'
         struct.pack_into('<I', image, h+0x490, 1000)
+        struct.pack_into('<I', image, h+0x494, 800)  # client-script payload written
         self.regions[c.BUFFERS[c.SAVE_A][0]][0:4] = b'SAVE'
     def read(self, address, size):
         for base, data in self.regions.items():
@@ -351,3 +352,48 @@ except RuntimeError as error:
 else:
     raise AssertionError("Mismatched client VM accepted")
 print("Ascension client-script compatibility checks passed")
+
+# The client writes the checkpoint's client-script payload (header +0x494)
+# frames after the server commit. Never archive or overwrite before it lands.
+with tempfile.TemporaryDirectory(dir=c.ROOT) as directory:
+    c.ARCHIVE = Path(directory)
+    late = FakeGame()
+    late.write(c.SAVE_A + c.HEADER_OFFSET + 0x494, struct.pack('<I', 0))
+    assert not c.wait_for_client_state(late, timeout=0)
+    incomplete = c.snapshot(late, 3, wait_client_state=False)
+    assert c.load_archive(incomplete)[0]["client_state_missing"] is True
+    polls = []
+    real_committed = c.committed
+    def payload_lands(game):
+        polls.append(1)
+        if len(polls) == 3:
+            game.write(c.SAVE_A + c.HEADER_OFFSET + 0x494, struct.pack('<I', 640))
+        return real_committed(game)
+    with patch.object(c, "committed", side_effect=payload_lands), \
+         patch.object(c.time, "sleep"):
+        assert c.wait_for_client_state(late, timeout=5)
+    complete = c.snapshot(late, 3)
+    assert "client_state_missing" not in c.load_archive(complete)[0]
+
+    racing = FakeGame()
+    source = c.snapshot(racing, 3)
+    racing.write(c.SAVE_A + c.HEADER_OFFSET + 0xc, struct.pack('<I', 2))
+    racing.write(c.SAVE_A + c.HEADER_OFFSET + 0x494, struct.pack('<I', 0))
+    before_target = racing.read(c.SAVE_B, c.SAVE_SIZE)
+    try:
+        c.restore(racing, source, coop=True)
+    except c.ClientStatePending:
+        pass
+    else:
+        raise AssertionError("Restore published before the fresh client state was written")
+    assert racing.u32(c.COMMITTED_PTR) == c.SAVE_A
+    assert racing.read(c.SAVE_B, c.SAVE_SIZE) == before_target
+print("Client-script payload wait and restore guard passed")
+
+# Live co-op detection reads players from the committed in-memory checkpoint.
+live = FakeGame()
+with patch("checkpoint_stats.extract_players_from_payload", return_value=[{"name": "A"}, {"name": "B"}]) as decode:
+    assert [p["name"] for p in c.checkpoint_players(live)] == ["A", "B"]
+state_arg, body_arg = decode.call_args.args
+assert state_arg[:4] == b"SAVE" and body_arg == 1000
+print("Co-op checkpoint player detection passed")

@@ -52,7 +52,26 @@ def test_two_players():
     ]
 
 
+def test_short_and_unicode_names():
+    """Co-op Steam personas can be short or non-ASCII; the slot prefix validates them."""
+    weapon_data = struct.pack("<I", 2) + bytes((8,)) + b"m1911_zm"
+    state = bytearray(0x9000)
+    # A non-zero byte of the previous field sits right before each name.
+    for base, client, name in ((0x1000, 0, "Jo".encode()), (0x4000, 1, "Zoë★".encode())):
+        struct.pack_into("<I", state, base - 4, client)
+        state[base + 0x130] = client
+        state[base + 0x144] = 1
+        struct.pack_into("<I", state, base + 0x1DC, 1)
+        state[base + 0x1AA0 - 1] = 0x9C
+        state[base + 0x1AA0:base + 0x1AA0 + len(name) + 1] = name + b"\0"
+        state[base + 0x1B38:base + 0x1B38 + len(name) + 1] = name + b"\0"
+        struct.pack_into("<ii", state, base + 0x1B88, 500, 3)
+    players = checkpoint_stats.players_from_segments(weapon_data, bytes(268), bytes(state))
+    assert [(p["client_slot"], p["name"]) for p in players] == [(0, "Jo"), (1, "Zoë★")], players
+
+
 if __name__ == "__main__":
     test_decoder()
     test_two_players()
+    test_short_and_unicode_names()
     print("Two-player checkpoint stat decoding passed")

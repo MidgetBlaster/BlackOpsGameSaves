@@ -8,6 +8,10 @@ import threading
 import checkpoint_memory as core
 import game_launcher
 
+# Launcher fakes do not model the client-script payload; tested separately below.
+_real_wait_for_client_state = core.wait_for_client_state
+core.wait_for_client_state = lambda game, timeout=core.CLIENT_STATE_TIMEOUT: True
+
 
 for waiting in (lambda cancel: game_launcher.wait_for_game(cancel),
                 lambda cancel: game_launcher.wait_for_replacement_game(4420, cancel)):
@@ -382,7 +386,7 @@ with (patch.object(core, "game_pid", return_value=4420),
       patch.object(game_launcher, "wait_for_map_ready") as ready):
     game_launcher.switch_running_map(switch_game, "zombie_cod5_factory")
 assert switch_game.commands == ["F10"]
-prepare.assert_called_once_with(legacy=False, enhanced=False, round_bridge=False, map_state=False)
+prepare.assert_called_once_with(legacy=False, enhanced=False, round_bridge=False, map_state=False, in_game_pause=False)
 assert not (core.ROOT / "checkpoint_switch.cfg").exists()
 assert not (core.ROOT / "mods" / "devcommands" / "checkpoint_switch.cfg").exists()
 assert ready.call_args.kwargs == {"during_opening": True, "allow_stale_checkpoint": True}
@@ -409,7 +413,7 @@ with (patch.object(core, "load_archive", return_value=({"map": "zombie_cod5_fact
     same_map, _ = game_launcher.start_selected_game(core.ARCHIVE / "sample.bo1checkpoint", "Solo")
 assert same_map is switch_game
 switch.assert_called_once_with(switch_game, "zombie_cod5_factory", None,
-                               legacy=False, enhanced=False, round_bridge=False, map_state=False)
+                               legacy=False, enhanced=False, round_bridge=False, map_state=False, in_game_pause=False)
 
 from types import SimpleNamespace
 replacement_game = SimpleNamespace()
@@ -433,7 +437,7 @@ with (patch.object(core, "game_pid", return_value=4420),
     fresh_map = game_launcher.start_new_game("zombie_cod5_factory")
 assert fresh_map is switch_game
 switch.assert_called_once_with(switch_game, "zombie_cod5_factory", None,
-                               legacy=False, enhanced=True, round_bridge=True, map_state=True)
+                               legacy=False, enhanced=True, round_bridge=True, map_state=True, in_game_pause=True)
 assert ready.call_args.kwargs == {"during_opening": False, "allow_stale_checkpoint": True}
 
 print("Launcher readiness and bound save/load keys passed")
@@ -647,3 +651,20 @@ with (patch.object(core, "game_pid", return_value=None),
     assert game_launcher.start_new_game("zombie_temple") is fresh_game
 command.assert_called_once_with("zombie_temple")
 print("New Game launches directly with the Steam persona before devmap")
+
+
+# Continue waits for the fresh checkpoint's client state and retries the restore.
+core.wait_for_client_state = _real_wait_for_client_state
+race_game = FreshGame()
+with (patch.object(core, "load_archive", return_value=({"map": "zombie_temple", "round": 11,
+                                                         "secondary_size": 0}, {})),
+      patch.object(game_launcher, "make_fresh_checkpoint"),
+      patch.object(core, "wait_for_client_state", return_value=True) as client_wait,
+      patch.object(core, "restore", side_effect=[core.ClientStatePending("late"), None]) as restore_mock,
+      patch.object(game_launcher, "wait_for_focus"),
+      patch.object(game_launcher, "wait_for_loaded_round", return_value=True)):
+    restored = game_launcher.restore_and_continue(race_game, Path("temple.bo1checkpoint"), "Solo")
+assert restore_mock.call_count == 2 and client_wait.call_count == 2
+assert "client-side state" in restored["resume_warning"]
+assert race_game.commands[-1] == "F12"
+print("Continue waits for the fresh checkpoint's client state before restoring")

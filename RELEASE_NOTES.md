@@ -1,3 +1,11 @@
+# Black Ops Game Saves v1.0.38
+
+- Wait for each checkpoint's client-script payload before archiving it. The game writes this payload a few frames after the server commit; earlier captures (such as a reported Call of the Dead save) stored no client state. Archives still missing it are marked, and Continue warns about them.
+- Continue no longer restores while the fresh map checkpoint is still receiving its client state. A late write could land on the restored save and mix fresh-map client state into it; a reported Shangri-La install showed roughly 90 retried restores, many during that window. The restore now waits and retries, and stops without changing memory if the state never arrives.
+- Saved player stats now recognize short (1–2 character) and non-ASCII Steam names, so co-op saves are no longer shown as Solo when a friend's name is unusual. Existing saves decode identically.
+- Pause co-op now reports the players found in the latest checkpoint and explains when fewer than two are found.
+- New games use pause script v5, which keeps a pause requested from the Game Save App even when fewer than two players are counted (v4 cancelled it on its own), and also applies the AI pause dvars on the host's client as the community co-op pause mod does. The pause is still triggered only by the app's Pause co-op button (F9/F8 on the host). Saves made with v4 still load with v4.
+
 # Black Ops Game Saves v1.0.37
 
 - Keep stalled manual-save queue recovery alive across autosave retry windows and additional F11 requests. Previously four-second retries could repeatedly reset an eight-second recovery timer.

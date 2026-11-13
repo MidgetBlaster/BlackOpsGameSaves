@@ -679,7 +679,38 @@ def committed(game: GameProcess) -> tuple[int, bytes, dict]:
     return address, image, h
 
 
-def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -> Path:
+CLIENT_STATE_TIMEOUT = 5.0
+
+
+def wait_for_client_state(game: GameProcess, timeout: float = CLIENT_STATE_TIMEOUT) -> bool:
+    """Wait until the committed checkpoint carries its client-script payload.
+
+    The server commits a checkpoint first; the local client writes the second
+    (client-script) payload and its size at header +0x494 on a later frame.
+    Archives captured before that, and restores published before that, lose
+    or overwrite the client state. Shangri-La and Call of the Dead lag the
+    most at map start. Returns False if the payload never appeared.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            _, _, header = committed(game)
+            if header["secondary_size"] > 0:
+                return True
+        except RuntimeError:
+            pass
+        except OSError as error:
+            if isinstance(error, PermissionError) or error.errno not in (299, 487, 998):
+                raise
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def snapshot(game: GameProcess, round_number: int, target: Path | None = None,
+             *, wait_client_state: bool = True) -> Path:
+    if wait_client_state:
+        wait_for_client_state(game)
     captured_vision = None
     vision_warning = None
     captured_moon_vision = None
@@ -719,6 +750,8 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
                 "source_data_delta": DATA_DELTA,
                 "save_address": address, "round": round_number,
                 "saved_at": datetime.now().astimezone().isoformat(), **h}
+    if not h["secondary_size"]:
+        metadata["client_state_missing"] = True
     if h["map"] == "zombie_cosmodrome":
         package = ROOT / "Game Save.iwd"
         if not package.exists():
@@ -742,9 +775,13 @@ def snapshot(game: GameProcess, round_number: int, target: Path | None = None) -
         metadata["script_variant"] = "player_options_v2"
         metadata["power_on"] = any(POWER_MARKER in part for part in parts)
     map_variant = ROOT / "scriptdata" / "checkpoint_variants" / "_checkpoint_coop_pause_v4.gsc"
-    if (options_script.is_file() and map_variant.is_file() and
-            options_script.read_bytes() == map_variant.read_bytes()):
-        metadata["script_variant"] = "map_state_v1"
+    pause_variant = ROOT / "scriptdata" / "checkpoint_variants" / "_checkpoint_coop_pause_v5.gsc"
+    map_state_variant = next((name for name, variant in (("map_state_v1", map_variant),
+                                                         ("map_state_v2", pause_variant))
+                              if options_script.is_file() and variant.is_file() and
+                              options_script.read_bytes() == variant.read_bytes()), None)
+    if map_state_variant:
+        metadata["script_variant"] = map_state_variant
         metadata["power_on"] = any(POWER_MARKER in part for part in parts)
         metadata["map_state_coverage"] = {
             "server": "engine_script_vm",
@@ -870,13 +907,18 @@ def restore(game: GameProcess, path: Path, coop: bool = False, *, prepared_archi
             raise RuntimeError("The game's inactive save buffer pointer is invalid")
         if game.u32(target + STATE_OFFSET) != 0:
             raise RuntimeError("The inactive save buffer is busy; pause and retry")
+        if coop and not current["secondary_size"]:
+            # The client has not yet written the fresh checkpoint's
+            # client-script payload. Publishing now lets that late write land
+            # on the restored checkpoint and mix fresh-map client state into it.
+            raise ClientStatePending("The game is still writing the fresh checkpoint's client state; retry")
         image = bytearray(pieces["save.bin"])
         struct.pack_into("<I", image, 0, BUFFERS[target][0])
         struct.pack_into("<I", image, MEMFILE_SIZE, BUFFERS[target][1])
         validate_image(target, image)
         # Keep a reversible copy of the current checkpoint before process writes.
         backup = ARCHIVE / f"before-restore-{datetime.now():%Y%m%d-%H%M%S-%f}.bo1backup"
-        snapshot(game, 0).replace(backup)
+        snapshot(game, 0, wait_client_state=False).replace(backup)
         try:
             for data, destination in zip((pieces["state.bin"], pieces["secondary.bin"]), BUFFERS[target]):
                 game.write(destination, data)
@@ -1065,6 +1107,10 @@ class RoundEndTracker:
             self.pending = (label, completed, now + 2, signal)
 
 
+class ClientStatePending(RuntimeError):
+    """The fresh checkpoint's client-script payload has not been written yet."""
+
+
 class CheckpointNotCommitted(RuntimeError):
     """The bound save key was sent, but the game did not commit a save."""
 
@@ -1200,6 +1246,20 @@ def request_fresh_checkpoint(game: GameProcess, prior_id: int, timeout: float = 
     label = map_name or SCENES.get(scene, "the current map")
     raise CheckpointNotCommitted(
         f"{last_error or 'The checkpoint did not commit'} ({label}; pending save requests: {queue})")
+
+
+def checkpoint_players(game: GameProcess) -> list[dict]:
+    """Players recorded in the game's committed in-memory checkpoint.
+
+    The engine has no cheaper player list we can read safely; the latest
+    checkpoint serializes every client slot, so it shows who was in the game
+    at the last save (F11 or an automatic save).
+    """
+    from checkpoint_stats import extract_players_from_payload
+    with game.suspended():
+        address, _, header = committed(game)
+        state = game.read(BUFFERS[address][0], BUFFER_SIZES[0])
+    return extract_players_from_payload(state, header["body_size"])
 
 
 def live_round(game: GameProcess) -> int | None:
@@ -1379,7 +1439,7 @@ def watch(start_round: int | None = None, stop_event=None, on_event=None, save_l
                         if (last_round and time.monotonic() >= resume_manual_after and
                                 final_marker != last_marker):
                             with save_lock if save_lock is not None else nullcontext():
-                                final_path = snapshot(game, last_round)
+                                final_path = snapshot(game, last_round, wait_client_state=False)
                             if on_event:
                                 on_event("manual", last_round, final_path)
                             RECOVERY_FILE.unlink(missing_ok=True)
